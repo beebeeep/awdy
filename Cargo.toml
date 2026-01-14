@@ -1,0 +1,11 @@
+[package]
+name = "awdy"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.100"
+color-eyre = "0.6.5"
+crossterm = "0.29.0"
+ratatui = { version = "0.30.0", features = ["crossterm_0_29"] }
+tui-widget-list = "0.15.0"
