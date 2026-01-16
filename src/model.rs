@@ -49,9 +49,9 @@ pub(crate) enum TaskState {
     Done,
 }
 
-impl Into<String> for TaskState {
-    fn into(self) -> String {
-        match self {
+impl From<TaskState> for String {
+    fn from(t: TaskState) -> Self {
+        match t {
             TaskState::Todo => "TODO",
             TaskState::InProgress => "In progress",
             TaskState::Blocked => "Blocked",

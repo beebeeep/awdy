@@ -19,7 +19,7 @@ pub(crate) struct LaneState {
 }
 
 impl LaneState {
-    pub(crate) fn new<'a>(active: bool, tasks: Rc<RefCell<Vec<Task>>>) -> Self {
+    pub(crate) fn new(active: bool, tasks: Rc<RefCell<Vec<Task>>>) -> Self {
         Self {
             active,
             list_state: ListState::default(),

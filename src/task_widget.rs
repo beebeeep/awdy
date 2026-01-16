@@ -1,6 +1,6 @@
 use ratatui::{
     buffer::Buffer,
-    layout::{Constraint, Flex, Layout, Margin, Rect},
+    layout::{Constraint, Layout, Margin, Rect},
     style::Style,
     text::Line,
     widgets::{Block, Clear, Widget},
@@ -14,16 +14,13 @@ struct LabeledEdit<'a, 'b> {
     edit: &'b TextArea<'a>,
 }
 
-impl<'a, 'b> LabeledEdit<'a, '_> {
+impl<'a> LabeledEdit<'a, '_> {
     fn new(label: &'a str, edit: &'a TextArea) -> Self {
-        Self {
-            label: label.into(),
-            edit,
-        }
+        Self { label, edit }
     }
 }
 
-impl<'a, 'b> Widget for &LabeledEdit<'_, '_> {
+impl Widget for &LabeledEdit<'_, '_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let layout = Layout::horizontal(vec![
             Constraint::Length(self.label.len() as u16),
@@ -80,7 +77,7 @@ impl Widget for &TaskView<'_> {
         ])
         .split(task_area);
 
-        Clear.render(window_area.clone(), buf);
+        Clear.render(window_area, buf);
         block.render(window_area, buf);
         LabeledEdit::new("Title:", &self.text_areas[TaskView::TITLE]).render(layout[0], buf);
         self.text_areas[1].render(layout[TaskView::DESCRIPTION], buf);

@@ -1,14 +1,10 @@
 use anyhow::Result;
-use crossterm::event::KeyEvent;
 use std::{cell::RefCell, collections::HashMap, rc::Rc, time::Duration};
-use tui_textarea::TextArea;
 
 use ratatui::{
     Frame,
     crossterm::event::{self, Event, KeyCode, KeyModifiers},
-    layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
-    widgets::{Block, Paragraph, Widget},
+    layout::{Constraint, Direction, Layout},
 };
 
 use crate::{
@@ -23,7 +19,7 @@ pub struct App<'a> {
 
 impl<'a> App<'a> {
     pub fn load() -> Result<Self> {
-        let all_tasks = vec![
+        let all_tasks = [
             Task {
                 id: Some(1),
                 state: TaskState::Todo,
@@ -118,7 +114,7 @@ fn view(model: &mut Model, frame: &mut Frame) {
     match model.running_state {
         RunningState::MainView => main_view(model, frame),
         RunningState::TaskView => task_view(model, frame),
-        RunningState::Done => return,
+        RunningState::Done => {}
     }
 }
 
@@ -133,7 +129,7 @@ fn main_view(model: &mut Model, frame: &mut Frame) {
         ])
         .split(frame.area());
 
-    for (lane, area) in model.lanes.iter_mut().zip(layout.into_iter()) {
+    for (lane, area) in model.lanes.iter_mut().zip(layout.iter()) {
         let lane_widget = LaneWidget {
             title: lane.for_state.into(),
         };
