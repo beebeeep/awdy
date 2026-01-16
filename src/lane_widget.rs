@@ -2,7 +2,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use ratatui::{
     buffer::Buffer,
-    layout::{HorizontalAlignment, Rect},
+    layout::Rect,
     style::{Modifier, Style},
     text::Line,
     widgets::{Block, BorderType, StatefulWidget, Widget},
@@ -84,7 +84,7 @@ impl StatefulWidget for &LaneWidget {
         let list = ListView::new(builder, tasks.len());
         let mut block = Block::bordered()
             .title(self.title.clone())
-            .title_alignment(HorizontalAlignment::Center);
+            .title_alignment(ratatui::layout::Alignment::Center);
 
         let mut block_title_style = Style::default()
             .fg(COLOR_SCHEME.lane_title_fg)

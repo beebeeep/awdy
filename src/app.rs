@@ -1,52 +1,59 @@
 use anyhow::Result;
+use crossterm::event::KeyEvent;
 use std::{cell::RefCell, collections::HashMap, rc::Rc, time::Duration};
-use tui_widget_list::ListState;
+use tui_textarea::TextArea;
 
 use ratatui::{
     Frame,
-    crossterm::event::{self, Event, KeyCode},
-    layout::{Constraint, Direction, HorizontalAlignment, Layout, Rect},
+    crossterm::event::{self, Event, KeyCode, KeyModifiers},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, Paragraph},
+    widgets::{Block, Paragraph, Widget},
 };
 
 use crate::{
-    lane::{LaneState, LaneWidget},
+    lane_widget::{LaneState, LaneWidget},
     model::{LaneList, Message, Model, RunningState, Task, TaskState},
+    task_widget::TaskView,
 };
 
-pub struct App {
-    model: Model,
+pub struct App<'a> {
+    model: Model<'a>,
 }
 
-impl App {
+impl<'a> App<'a> {
     pub fn load() -> Result<Self> {
         let all_tasks = vec![
             Task {
+                id: Some(1),
                 state: TaskState::Todo,
                 title: "Do stuff".to_string(),
                 description: Some("lorem ipsum".to_string()),
                 tags: vec!["chlos".to_string()],
             },
             Task {
+                id: Some(2),
                 state: TaskState::Todo,
                 title: "Do more stuff".to_string(),
                 description: Some("lorem ipsum".to_string()),
                 tags: vec!["chlos".to_string()],
             },
             Task {
+                id: Some(3),
                 state: TaskState::Todo,
                 title: "Don't do shit".to_string(),
                 description: Some("lorem ipsum".to_string()),
                 tags: vec!["chlos".to_string()],
             },
             Task {
+                id: Some(4),
                 state: TaskState::InProgress,
                 title: "Writing shit".to_string(),
                 description: Some("lorem ipsum".to_string()),
                 tags: vec!["chlos".to_string()],
             },
             Task {
+                id: Some(5),
                 state: TaskState::Done,
                 title: "Give a shit".to_string(),
                 description: Some("lorem ipsum".to_string()),
@@ -83,6 +90,7 @@ impl App {
                 running_state: RunningState::MainView,
                 tasks,
                 lanes,
+                task_view: None,
             },
         })
     }
@@ -109,6 +117,7 @@ impl App {
 fn view(model: &mut Model, frame: &mut Frame) {
     match model.running_state {
         RunningState::MainView => main_view(model, frame),
+        RunningState::TaskView => task_view(model, frame),
         RunningState::Done => return,
     }
 }
@@ -132,6 +141,13 @@ fn main_view(model: &mut Model, frame: &mut Frame) {
     }
 }
 
+fn task_view(model: &mut Model, frame: &mut Frame) {
+    main_view(model, frame); // draw lanes in background to keep visual context
+    if let Some(v) = &model.task_view {
+        frame.render_widget(v, frame.area());
+    }
+}
+
 fn handle_event(m: &Model) -> Result<Option<Message>> {
     if event::poll(Duration::from_millis(250))? {
         if let Event::Key(key) = event::read()? {
@@ -151,7 +167,27 @@ fn handle_key(m: &Model, key: event::KeyEvent) -> Option<Message> {
             KeyCode::BackTab => Some(Message::PrevLane),
             KeyCode::Down | KeyCode::Char('j') => Some(Message::NextTask),
             KeyCode::Up | KeyCode::Char('k') => Some(Message::PrevTask),
+            KeyCode::Enter => Some(Message::OpenTask),
             _ => None,
+        },
+        RunningState::TaskView => match key {
+            event::KeyEvent {
+                code: KeyCode::Tab, ..
+            } => Some(Message::FocusNext),
+            event::KeyEvent {
+                code: KeyCode::BackTab,
+                ..
+            } => Some(Message::FocusPrev),
+            event::KeyEvent {
+                code: KeyCode::Esc, ..
+            } => Some(Message::CloseTask),
+            event::KeyEvent {
+                code: KeyCode::Char('s'),
+                modifiers: KeyModifiers::CONTROL,
+                ..
+            } => Some(Message::SaveTask),
+
+            event => Some(Message::KeyPress(event)),
         },
         RunningState::Done => None,
     }
@@ -162,7 +198,6 @@ fn update(model: &mut Model, msg: Message) -> Option<Message> {
         Message::Quit => {
             model.running_state = RunningState::Done;
         }
-        Message::KeyPress(_key_event) => {}
         Message::NextLane => {
             model.lanes[model.active_lane].state.active = false;
             model.active_lane = (model.active_lane + 1) % model.lanes.len();
@@ -179,6 +214,51 @@ fn update(model: &mut Model, msg: Message) -> Option<Message> {
         Message::PrevTask => {
             model.lanes[model.active_lane].state.list_state.previous();
         }
+        Message::OpenTask => {
+            let selected_task = model.lanes[model.active_lane]
+                .state
+                .list_state
+                .selected
+                .unwrap();
+            let lane_tasks = model
+                .tasks
+                .get(&model.lanes[model.active_lane].for_state)
+                .unwrap()
+                .borrow();
+            model.task_view = Some(TaskView::from_task(lane_tasks[selected_task].clone()));
+            model.running_state = RunningState::TaskView;
+        }
+        Message::CloseTask => {
+            model.running_state = RunningState::MainView;
+            model.task_view = None;
+        }
+        Message::SaveTask => {}
+        Message::FocusNext => match model.running_state {
+            RunningState::TaskView => {
+                if let Some(tv) = model.task_view.as_mut() {
+                    tv.active_text_area = (tv.active_text_area + 1) % tv.text_areas.len();
+                }
+            }
+            _ => {}
+        },
+        Message::FocusPrev => match model.running_state {
+            RunningState::TaskView => {
+                if let Some(tv) = model.task_view.as_mut() {
+                    tv.active_text_area =
+                        (tv.active_text_area + tv.text_areas.len() - 1) % tv.text_areas.len();
+                }
+            }
+            _ => {}
+        },
+        Message::KeyPress(event) => match model.running_state {
+            RunningState::TaskView => {
+                if let Some(tv) = model.task_view.as_mut() {
+                    // TODO: too much logic goes here, seems like we need to offload it to TaskView
+                    tv.text_areas[tv.active_text_area].input(event);
+                }
+            }
+            _ => {}
+        },
     };
     None
 }
