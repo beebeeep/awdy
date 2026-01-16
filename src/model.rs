@@ -1,15 +1,17 @@
-use tui_widget_list::ListState;
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use crate::lane::LaneState;
+use crate::lane;
+use crossterm::event::KeyEvent;
 
 #[derive(Debug)]
 pub(crate) struct Model {
-    pub(crate) tasks: Vec<Task>,
+    pub(crate) tasks: HashMap<TaskState, Rc<RefCell<Vec<Task>>>>,
     pub(crate) running_state: RunningState,
+    pub(crate) active_lane: usize,
     pub(crate) lanes: Vec<LaneList>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct Task {
     pub(crate) state: TaskState,
     pub(crate) title: String,
@@ -20,24 +22,18 @@ pub(crate) struct Task {
 
 #[derive(Debug)]
 pub(crate) struct LaneList {
-    pub(crate) task_state: TaskState,
-    pub(crate) state: LaneState,
+    pub(crate) for_state: TaskState,
+    pub(crate) state: lane::LaneState,
 }
 
 #[derive(Debug, Default, PartialEq)]
 pub(crate) enum RunningState {
     #[default]
-    Running,
+    MainView,
     Done,
 }
 
-#[derive(Debug, Default)]
-pub(crate) enum Mode {
-    #[default]
-    Main,
-}
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, PartialOrd, Eq, Ord)]
+#[derive(Hash, Debug, Default, Clone, Copy, PartialEq, PartialOrd, Eq, Ord)]
 pub(crate) enum TaskState {
     #[default]
     Todo,
@@ -60,8 +56,10 @@ impl Into<String> for TaskState {
 
 #[derive(PartialEq)]
 pub(crate) enum Message {
-    Increment,
-    Decrement,
-    Reset,
+    KeyPress(KeyEvent),
+    NextLane,
+    PrevLane,
+    NextTask,
+    PrevTask,
     Quit,
 }

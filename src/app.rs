@@ -1,5 +1,5 @@
 use anyhow::Result;
-use std::time::Duration;
+use std::{cell::RefCell, collections::HashMap, rc::Rc, time::Duration};
 use tui_widget_list::ListState;
 
 use ratatui::{
@@ -21,7 +21,7 @@ pub struct App {
 
 impl App {
     pub fn load() -> Result<Self> {
-        let tasks = vec![
+        let all_tasks = vec![
             Task {
                 state: TaskState::Todo,
                 title: "Do stuff".to_string(),
@@ -53,32 +53,34 @@ impl App {
                 tags: vec!["chlos".to_string()],
             },
         ];
-        let todo_tasks = tasks.iter().filter(|t| t.state == TaskState::Todo);
-        let in_progress_tasks = tasks.iter().filter(|t| t.state == TaskState::InProgress);
-        let blocked_tasks = tasks.iter().filter(|t| t.state == TaskState::Blocked);
-        let done_tasks = tasks.iter().filter(|t| t.state == TaskState::Done);
-        let lanes = vec![
-            LaneList {
-                task_state: TaskState::Todo,
-                state: LaneState::from_tasks(todo_tasks),
-            },
-            LaneList {
-                task_state: TaskState::InProgress,
-                state: LaneState::from_tasks(in_progress_tasks),
-            },
-            LaneList {
-                task_state: TaskState::Blocked,
-                state: LaneState::from_tasks(blocked_tasks),
-            },
-            LaneList {
-                task_state: TaskState::Done,
-                state: LaneState::from_tasks(done_tasks),
-            },
-        ];
+        let mut tasks = HashMap::new();
+        let mut lanes = Vec::with_capacity(4);
+        for state in [
+            TaskState::Todo,
+            TaskState::InProgress,
+            TaskState::Blocked,
+            TaskState::Done,
+        ] {
+            let state_tasks = Rc::new(RefCell::new(
+                all_tasks
+                    .iter()
+                    .filter(|t| t.state == TaskState::Todo)
+                    .map(Clone::clone)
+                    .collect(),
+            ));
+            let lane = LaneList {
+                for_state: state,
+                state: LaneState::new(false, state_tasks.clone()),
+            };
+            lanes.push(lane);
+            tasks.insert(state, state_tasks);
+        }
+        lanes[0].state.active = true;
 
         Ok(Self {
             model: Model {
-                running_state: RunningState::Running,
+                active_lane: 0,
+                running_state: RunningState::MainView,
                 tasks,
                 lanes,
             },
@@ -105,6 +107,13 @@ impl App {
     }
 }
 fn view(model: &mut Model, frame: &mut Frame) {
+    match model.running_state {
+        RunningState::MainView => main_view(model, frame),
+        RunningState::Done => return,
+    }
+}
+
+fn main_view(model: &mut Model, frame: &mut Frame) {
     let layout = Layout::default()
         .direction(Direction::Horizontal)
         .constraints(vec![
@@ -115,52 +124,60 @@ fn view(model: &mut Model, frame: &mut Frame) {
         ])
         .split(frame.area());
 
-    let header_style = Style::default().add_modifier(Modifier::BOLD);
-
     for (lane, area) in model.lanes.iter_mut().zip(layout.into_iter()) {
         let lane_widget = LaneWidget {
-            title: lane.task_state.into(),
+            title: lane.for_state.into(),
         };
         frame.render_stateful_widget(&lane_widget, *area, &mut lane.state);
     }
 }
 
-/// Convert Event to Message
-///
-/// We don't need to pass in a `model` to this function in this example
-/// but you might need it as your project evolves
-fn handle_event(_: &Model) -> Result<Option<Message>> {
+fn handle_event(m: &Model) -> Result<Option<Message>> {
     if event::poll(Duration::from_millis(250))? {
         if let Event::Key(key) = event::read()? {
             if key.kind == event::KeyEventKind::Press {
-                return Ok(handle_key(key));
+                return Ok(handle_key(m, key));
             }
         }
     }
     Ok(None)
 }
 
-fn handle_key(key: event::KeyEvent) -> Option<Message> {
-    match key.code {
-        KeyCode::Char('j') => Some(Message::Increment),
-        KeyCode::Char('k') => Some(Message::Decrement),
-        KeyCode::Char('q') => Some(Message::Quit),
-        _ => None,
+fn handle_key(m: &Model, key: event::KeyEvent) -> Option<Message> {
+    match m.running_state {
+        RunningState::MainView => match key.code {
+            KeyCode::Char('q') => Some(Message::Quit),
+            KeyCode::Tab => Some(Message::NextLane),
+            KeyCode::BackTab => Some(Message::PrevLane),
+            KeyCode::Down | KeyCode::Char('j') => Some(Message::NextTask),
+            KeyCode::Up | KeyCode::Char('k') => Some(Message::PrevTask),
+            _ => None,
+        },
+        RunningState::Done => None,
     }
 }
 
 fn update(model: &mut Model, msg: Message) -> Option<Message> {
     match msg {
-        Message::Increment => {
-            todo!();
-        }
-        Message::Decrement => {
-            todo!();
-        }
-        Message::Reset => todo!(),
         Message::Quit => {
-            // You can handle cleanup and exit here
             model.running_state = RunningState::Done;
+        }
+        Message::KeyPress(_key_event) => {}
+        Message::NextLane => {
+            model.lanes[model.active_lane].state.active = false;
+            model.active_lane = (model.active_lane + 1) % model.lanes.len();
+            model.lanes[model.active_lane].state.active = true;
+        }
+        Message::PrevLane => {
+            model.lanes[model.active_lane].state.active = false;
+            model.active_lane = (model.active_lane + model.lanes.len() - 1) % model.lanes.len();
+            model.lanes[model.active_lane].state.active = true;
+        }
+        Message::NextTask => {
+            model.lanes[model.active_lane].state.list_state.next();
+        }
+        Message::PrevTask => {
+            model.lanes[model.active_lane].state.list_state.previous();
         }
     };
     None
