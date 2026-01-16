@@ -15,6 +15,8 @@ pub(crate) struct ColorScheme {
     pub(crate) lane_title_bg: Color,
     pub(crate) lane_active_title_fg: Color,
     pub(crate) lane_active_title_bg: Color,
+    pub(crate) status_bar_bg: Color,
+    pub(crate) status_bar_fg: Color,
 }
 
 impl ColorScheme {
@@ -29,6 +31,8 @@ impl ColorScheme {
             lane_title_bg: Color::Reset,
             lane_active_title_fg: Color::Reset,
             lane_active_title_bg: Color::Rgb(0xbf, 0xdb, 0xfe),
+            status_bar_fg: Color::Reset,
+            status_bar_bg: Color::Rgb(0xd0, 0xd0, 0xd0),
         }
     }
 }

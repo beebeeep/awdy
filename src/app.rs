@@ -4,10 +4,14 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc, time::Duration};
 use ratatui::{
     Frame,
     crossterm::event::{self, Event, KeyCode, KeyModifiers},
-    layout::{Constraint, Direction, Layout},
+    layout::{Constraint, Direction, Layout, Rect},
+    style::{Style, Stylize},
+    text::Line,
+    widgets::{Block, Clear, Paragraph},
 };
 
 use crate::{
+    color_scheme::COLOR_SCHEME,
     lane_widget::{LaneState, LaneWidget},
     model::{LaneList, Message, Model, RunningState, Task, TaskState},
     task_widget::TaskView,
@@ -67,7 +71,7 @@ impl<'a> App<'a> {
             let state_tasks = Rc::new(RefCell::new(
                 all_tasks
                     .iter()
-                    .filter(|t| t.state == TaskState::Todo)
+                    .filter(|t| t.state == state)
                     .map(Clone::clone)
                     .collect(),
             ));
@@ -111,14 +115,33 @@ impl<'a> App<'a> {
     }
 }
 fn view(model: &mut Model, frame: &mut Frame) {
+    let layout = Layout::vertical([Constraint::Fill(1), Constraint::Max(1)]).split(frame.area());
+    status_bar(model, frame, layout[1]);
     match model.running_state {
-        RunningState::MainView => main_view(model, frame),
-        RunningState::TaskView => task_view(model, frame),
+        RunningState::MainView => main_view(model, frame, layout[0]),
+        RunningState::TaskView => task_view(model, frame, layout[0]),
         RunningState::Done => {}
     }
 }
 
-fn main_view(model: &mut Model, frame: &mut Frame) {
+fn status_bar(model: &mut Model, frame: &mut Frame, area: Rect) {
+    let text = match model.running_state {
+        RunningState::MainView => {
+            "Hint: use Tab and Shift+Tab to move between lanes, arrows or hjkl for navigation. Enter opens task."
+        }
+        RunningState::TaskView => {
+            "Hint: Esc to close without saving, Ctrl+S to save and close. Tags are comma-separated"
+        }
+        RunningState::Done => return,
+    };
+
+    let c = Paragraph::new(text)
+        .bg(COLOR_SCHEME.status_bar_bg)
+        .fg(COLOR_SCHEME.status_bar_fg);
+    frame.render_widget(c, area);
+}
+
+fn main_view(model: &mut Model, frame: &mut Frame, area: Rect) {
     let layout = Layout::default()
         .direction(Direction::Horizontal)
         .constraints(vec![
@@ -127,7 +150,7 @@ fn main_view(model: &mut Model, frame: &mut Frame) {
             Constraint::Percentage(25),
             Constraint::Percentage(25),
         ])
-        .split(frame.area());
+        .split(area);
 
     for (lane, area) in model.lanes.iter_mut().zip(layout.iter()) {
         let lane_widget = LaneWidget {
@@ -137,10 +160,10 @@ fn main_view(model: &mut Model, frame: &mut Frame) {
     }
 }
 
-fn task_view(model: &mut Model, frame: &mut Frame) {
-    main_view(model, frame); // draw lanes in background to keep visual context
+fn task_view(model: &mut Model, frame: &mut Frame, area: Rect) {
+    main_view(model, frame, area); // draw lanes in background to keep visual context
     if let Some(v) = &model.task_view {
-        frame.render_widget(v, frame.area());
+        frame.render_widget(v, area);
     }
 }
 
@@ -159,8 +182,8 @@ fn handle_key(m: &Model, key: event::KeyEvent) -> Option<Message> {
     match m.running_state {
         RunningState::MainView => match key.code {
             KeyCode::Char('q') => Some(Message::Quit),
-            KeyCode::Tab => Some(Message::NextLane),
-            KeyCode::BackTab => Some(Message::PrevLane),
+            KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => Some(Message::NextLane),
+            KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => Some(Message::PrevLane),
             KeyCode::Down | KeyCode::Char('j') => Some(Message::NextTask),
             KeyCode::Up | KeyCode::Char('k') => Some(Message::PrevTask),
             KeyCode::Enter => Some(Message::OpenTask),
@@ -221,18 +244,29 @@ fn update(model: &mut Model, msg: Message) -> Option<Message> {
                 .get(&model.lanes[model.active_lane].for_state)
                 .unwrap()
                 .borrow();
-            model.task_view = Some(TaskView::from_task(lane_tasks[selected_task].clone()));
+            model.task_view = Some(lane_tasks[selected_task].clone().into());
             model.running_state = RunningState::TaskView;
         }
         Message::CloseTask => {
             model.running_state = RunningState::MainView;
             model.task_view = None;
         }
-        Message::SaveTask => {}
+        Message::SaveTask => {
+            model.running_state = RunningState::MainView;
+            let task: Task = model.task_view.take().unwrap().into();
+            let mut tasks = model.tasks.get_mut(&task.state).unwrap().borrow_mut();
+            for existing_task in tasks.iter_mut() {
+                if task.id == existing_task.id {
+                    *existing_task = task;
+                    return None;
+                }
+            }
+            tasks.push(task);
+        }
         Message::FocusNext => match model.running_state {
             RunningState::TaskView => {
                 if let Some(tv) = model.task_view.as_mut() {
-                    tv.active_text_area = (tv.active_text_area + 1) % tv.text_areas.len();
+                    tv.next_field();
                 }
             }
             _ => {}
@@ -240,8 +274,7 @@ fn update(model: &mut Model, msg: Message) -> Option<Message> {
         Message::FocusPrev => match model.running_state {
             RunningState::TaskView => {
                 if let Some(tv) = model.task_view.as_mut() {
-                    tv.active_text_area =
-                        (tv.active_text_area + tv.text_areas.len() - 1) % tv.text_areas.len();
+                    tv.prev_field();
                 }
             }
             _ => {}
@@ -249,8 +282,7 @@ fn update(model: &mut Model, msg: Message) -> Option<Message> {
         Message::KeyPress(event) => match model.running_state {
             RunningState::TaskView => {
                 if let Some(tv) = model.task_view.as_mut() {
-                    // TODO: too much logic goes here, seems like we need to offload it to TaskView
-                    tv.text_areas[tv.active_text_area].input(event);
+                    tv.process_event(event);
                 }
             }
             _ => {}
