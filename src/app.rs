@@ -182,6 +182,11 @@ fn handle_key(m: &Model, key: event::KeyEvent) -> Option<Message> {
     match m.running_state {
         RunningState::MainView => match key.code {
             KeyCode::Char('q') => Some(Message::Quit),
+            KeyCode::Char('n') => Some(Message::NewTask),
+            KeyCode::Char('1') => Some(Message::MoveTask(TaskState::Todo)),
+            KeyCode::Char('2') => Some(Message::MoveTask(TaskState::InProgress)),
+            KeyCode::Char('3') => Some(Message::MoveTask(TaskState::Blocked)),
+            KeyCode::Char('4') => Some(Message::MoveTask(TaskState::Done)),
             KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => Some(Message::NextLane),
             KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => Some(Message::PrevLane),
             KeyCode::Down | KeyCode::Char('j') => Some(Message::NextTask),
@@ -247,6 +252,12 @@ fn update(model: &mut Model, msg: Message) -> Option<Message> {
             model.task_view = Some(lane_tasks[selected_task].clone().into());
             model.running_state = RunningState::TaskView;
         }
+        Message::NewTask => {
+            let mut task = Task::default();
+            task.state = model.lanes[model.active_lane].for_state;
+            model.task_view = Some(task.into());
+            model.running_state = RunningState::TaskView;
+        }
         Message::CloseTask => {
             model.running_state = RunningState::MainView;
             model.task_view = None;
@@ -262,6 +273,34 @@ fn update(model: &mut Model, msg: Message) -> Option<Message> {
                 }
             }
             tasks.push(task);
+        }
+        Message::MoveTask(to_state) => {
+            let from_state = model.lanes[model.active_lane].for_state;
+            if to_state == from_state {
+                return None;
+            }
+            let selected_task = match model.lanes[model.active_lane].state.list_state.selected {
+                Some(v) => v,
+                None => return None,
+            };
+            let mut from_tasks = model.tasks.get(&from_state).unwrap().borrow_mut();
+            if from_tasks.len() == 0 {
+                return None;
+            }
+            let task = from_tasks.remove(selected_task);
+            let mut to_tasks = model.tasks.get(&to_state).unwrap().borrow_mut();
+            to_tasks.push(task);
+
+            // move focus upwards if last task in list was selected
+            match model.lanes[model.active_lane].state.list_state.selected {
+                Some(idx) if idx >= from_tasks.len() => {
+                    model.lanes[model.active_lane]
+                        .state
+                        .list_state
+                        .select(Some(from_tasks.len().saturating_sub(1)));
+                }
+                _ => {}
+            }
         }
         Message::FocusNext => match model.running_state {
             RunningState::TaskView => {

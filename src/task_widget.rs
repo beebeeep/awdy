@@ -71,7 +71,9 @@ impl<'a> TaskView<'a> {
         self.on_focus_change();
     }
     pub(crate) fn process_event(&mut self, event: KeyEvent) {
-        if self.active_text_area == Self::TITLE && is_newline(event) {
+        if (self.active_text_area == Self::TITLE || self.active_text_area == Self::TAGS)
+            && is_newline(event)
+        {
             self.next_field();
         }
         self.text_areas[self.active_text_area].input(event);
