@@ -14,6 +14,7 @@ pub(crate) struct Model<'a> {
     pub(crate) lanes: Vec<LaneList>,
 
     pub(crate) task_view: Option<TaskView<'a>>,
+    pub(crate) last_error: Option<anyhow::Error>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -50,12 +51,21 @@ pub(crate) enum RunningState {
 #[derive(Hash, Debug, Default, Clone, Copy, PartialEq, PartialOrd, Eq, Ord)]
 pub(crate) enum TaskState {
     #[default]
-    Todo,
-    InProgress,
-    Blocked,
-    Done,
+    Todo = 0,
+    InProgress = 1,
+    Blocked = 2,
+    Done = 3,
 }
 
+impl From<Task> for TaskMeta {
+    fn from(t: Task) -> Self {
+        Self {
+            id: t.id,
+            state: t.state,
+            title: t.title,
+        }
+    }
+}
 impl From<TaskState> for String {
     fn from(t: TaskState) -> Self {
         match t {
@@ -93,5 +103,6 @@ pub(crate) enum Message {
     MoveTask(TaskState),
     FocusNext,
     FocusPrev,
+    CloseError,
     Quit,
 }

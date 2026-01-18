@@ -1,6 +1,11 @@
 use anyhow::{Context, Result};
 use rusqlite::{Connection, params};
-use std::{cell::RefCell, collections::HashMap, rc::Rc, time::Duration};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    rc::Rc,
+    time::Duration,
+};
 
 use ratatui::{
     Frame,
@@ -34,6 +39,7 @@ impl<'a> App<'a> {
                 id INTEGER PRIMARY KEY,
                 state INTEGER NOT NULL,
                 title TEXT NOT NULL,
+                description TEXT,
             )",
                 (),
             )
@@ -47,7 +53,7 @@ impl<'a> App<'a> {
             )
             .context("initializing database")?;
             let mut stmt = db
-                .prepare("SELECT id, state, title, description FROM tasks")
+                .prepare("SELECT id, state, title, FROM tasks")
                 .context("loading tasks")?;
             let rows = stmt
                 .query_map([], |r| {
@@ -97,6 +103,7 @@ impl<'a> App<'a> {
                 tasks,
                 lanes,
                 task_view: None,
+                last_error: None,
             },
         })
     }
@@ -123,7 +130,7 @@ impl<'a> App<'a> {
         let layout =
             Layout::vertical([Constraint::Fill(1), Constraint::Max(1)]).split(frame.area());
         self.status_bar(frame, layout[1]);
-        match self.model.running_state {
+        match &self.model.running_state {
             RunningState::MainView => self.main_view(frame, layout[0]),
             RunningState::TaskView => self.task_view(frame, layout[0]),
             RunningState::Done => {}
@@ -146,6 +153,7 @@ impl<'a> App<'a> {
             .fg(COLOR_SCHEME.status_bar_fg);
         frame.render_widget(c, area);
     }
+
     fn main_view(&mut self, frame: &mut Frame, area: Rect) {
         let layout = Layout::default()
             .direction(Direction::Horizontal)
@@ -171,6 +179,11 @@ impl<'a> App<'a> {
             frame.render_widget(v, area);
         }
     }
+
+    fn show_error(&mut self, frame: &mut Frame, area: Rect) {
+        todo!("popup error")
+    }
+
     fn handle_event(&self) -> Result<Option<Message>> {
         if event::poll(Duration::from_millis(250))? {
             if let Event::Key(key) = event::read()? {
@@ -183,6 +196,10 @@ impl<'a> App<'a> {
     }
 
     fn handle_key(&self, key: event::KeyEvent) -> Option<Message> {
+        if self.model.last_error.is_some() {
+            return Some(Message::CloseError);
+        }
+
         match self.model.running_state {
             RunningState::MainView => match key.code {
                 KeyCode::Char('q') => Some(Message::Quit),
@@ -226,6 +243,7 @@ impl<'a> App<'a> {
             Message::Quit => {
                 self.model.running_state = RunningState::Done;
             }
+            Message::CloseError => self.model.last_error = None,
             Message::NextLane => {
                 self.model.lanes[self.model.active_lane].state.active = false;
                 self.model.active_lane = (self.model.active_lane + 1) % self.model.lanes.len();
@@ -261,7 +279,13 @@ impl<'a> App<'a> {
                     .get(&self.model.lanes[self.model.active_lane].for_state)
                     .unwrap()
                     .borrow();
-                self.model.task_view = Some(lane_tasks[selected_task].clone().into());
+                self.model.task_view = match self.load_task(lane_tasks[selected_task].id.unwrap()) {
+                    Ok(t) => Some(t.into()),
+                    Err(e) => {
+                        self.model.last_error = Some(e);
+                        return None;
+                    }
+                };
                 self.model.running_state = RunningState::TaskView;
             }
             Message::NewTask => {
@@ -275,16 +299,28 @@ impl<'a> App<'a> {
                 self.model.task_view = None;
             }
             Message::SaveTask => {
-                self.model.running_state = RunningState::MainView;
                 let task: Task = self.model.task_view.take().unwrap().into();
-                let mut tasks = self.model.tasks.get_mut(&task.state).unwrap().borrow_mut();
+                let task_meta = match self.save_task(task).context("saving task") {
+                    Ok(t) => t,
+                    Err(e) => {
+                        self.model.last_error = Some(e);
+                        return None;
+                    }
+                };
+                let mut tasks = self
+                    .model
+                    .tasks
+                    .get_mut(&task_meta.state)
+                    .unwrap()
+                    .borrow_mut();
                 for existing_task in tasks.iter_mut() {
-                    if task.id == existing_task.id {
-                        *existing_task = task;
+                    if task_meta.id == existing_task.id {
+                        *existing_task = task_meta;
                         return None;
                     }
                 }
-                tasks.push(task);
+                tasks.push(task_meta);
+                self.model.running_state = RunningState::MainView;
             }
             Message::MoveTask(to_state) => {
                 let from_state = self.model.lanes[self.model.active_lane].for_state;
@@ -348,5 +384,76 @@ impl<'a> App<'a> {
             },
         };
         None
+    }
+
+    fn load_task(&self, id: u64) -> Result<Task> {
+        let mut stmt = self
+            .db
+            .prepare("SELECT state, title, description FROM tasks WHERE id = ?")?;
+        let task = stmt.query_row([id as i64], |r| {
+            Ok(Task {
+                id: Some(id),
+                state: r.get::<usize, i32>(0)?.into(),
+                title: r.get(1)?,
+                description: r.get(2)?,
+                tags: Vec::new(),
+            })
+        })?;
+        Ok(task)
+    }
+
+    fn save_task(&mut self, task: Task) -> Result<TaskMeta> {
+        let (sql, params) = match task.id {
+            Some(id) => (
+                "UPDATE tasks SET state=?,title=?,description=? WHERE id=?",
+                params![task.state as i32, task.title, task.description, id as i64],
+            ),
+            None => (
+                "INSERT INTO tasks SET state=?,title=?,description=?",
+                params![task.state as i32, task.title, task.description],
+            ),
+        };
+
+        let tx = self.db.transaction().context("starting transaction")?;
+
+        tx.execute(sql, params).context("saving task")?;
+        let id = match task.id {
+            Some(id) => id,
+            None => tx.last_insert_rowid() as u64,
+        };
+
+        let mut stmt = tx
+            .prepare("SELECT tag FROM tags WHERE task_id=?")
+            .context("querying tags")?;
+        let mut old_tags: HashSet<String> = HashSet::new();
+        for row in stmt
+            .query_map([id as i64], |r| Ok(r.get(0)?))
+            .context("querying tags")?
+        {
+            old_tags.insert(row?);
+        }
+        let new_tags = HashSet::from_iter(task.tags.iter().map(|x| x.clone()));
+        let tags_to_remove = old_tags.difference(&new_tags);
+        let tags_to_add = new_tags.difference(&old_tags);
+        let mut stmt = tx
+            .prepare("INSERT INTO tags (tag, task_id) VALUES (?)")
+            .context("inserting new task tags")?;
+        for tag in tags_to_add {
+            stmt.execute(params![tag, id as i64])
+                .context("inserting new tags")?;
+        }
+        let mut stmt = tx
+            .prepare("DELETE FROM tags WHERE tag = ? AND id = ?")
+            .context("removing task old tags")?;
+        for tag in tags_to_remove {
+            stmt.execute(params![tag, id as i64])
+                .context("removing task old tags")?;
+        }
+
+        Ok(TaskMeta {
+            id: Some(id),
+            state: task.state,
+            title: task.title,
+        })
     }
 }
