@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use rusqlite::{Connection, params};
 use std::{
     cell::RefCell,
@@ -11,13 +11,14 @@ use ratatui::{
     Frame,
     crossterm::event::{self, Event, KeyCode, KeyModifiers},
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Style, Stylize},
+    style::{Color, Style, Stylize},
     text::Line,
     widgets::{Block, Clear, Paragraph},
 };
 
 use crate::{
     color_scheme::COLOR_SCHEME,
+    error_widget::ErrorWidget,
     lane_widget::{LaneState, LaneWidget},
     model::{LaneList, Message, Model, RunningState, Task, TaskMeta, TaskState},
     task_widget::TaskView,
@@ -39,7 +40,7 @@ impl<'a> App<'a> {
                 id INTEGER PRIMARY KEY,
                 state INTEGER NOT NULL,
                 title TEXT NOT NULL,
-                description TEXT,
+                description TEXT
             )",
                 (),
             )
@@ -53,7 +54,7 @@ impl<'a> App<'a> {
             )
             .context("initializing database")?;
             let mut stmt = db
-                .prepare("SELECT id, state, title, FROM tasks")
+                .prepare("SELECT id, state, title FROM tasks")
                 .context("loading tasks")?;
             let rows = stmt
                 .query_map([], |r| {
@@ -135,6 +136,9 @@ impl<'a> App<'a> {
             RunningState::TaskView => self.task_view(frame, layout[0]),
             RunningState::Done => {}
         }
+        if self.model.last_error.is_some() {
+            self.show_error(frame, layout[0]);
+        }
     }
 
     fn status_bar(&self, frame: &mut Frame, area: Rect) {
@@ -181,7 +185,11 @@ impl<'a> App<'a> {
     }
 
     fn show_error(&mut self, frame: &mut Frame, area: Rect) {
-        todo!("popup error")
+        let p = ErrorWidget {
+            title: "ERROR".to_string(),
+            message: format!("{:#}", self.model.last_error.as_ref().unwrap()),
+        };
+        frame.render_widget(p, area);
     }
 
     fn handle_event(&self) -> Result<Option<Message>> {
@@ -300,10 +308,11 @@ impl<'a> App<'a> {
             }
             Message::SaveTask => {
                 let task: Task = self.model.task_view.take().unwrap().into();
-                let task_meta = match self.save_task(task).context("saving task") {
+                let task_meta = match self.save_task(&task).context("saving task") {
                     Ok(t) => t,
                     Err(e) => {
                         self.model.last_error = Some(e);
+                        self.model.task_view = Some(task.into());
                         return None;
                     }
                 };
@@ -339,6 +348,15 @@ impl<'a> App<'a> {
                 if from_tasks.len() == 0 {
                     return None;
                 }
+
+                match self.update_task_state(to_state, from_tasks[selected_task].id.unwrap()) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        self.model.last_error = Some(e);
+                        return None;
+                    }
+                };
+
                 let task = from_tasks.remove(selected_task);
                 let mut to_tasks = self.model.tasks.get(&to_state).unwrap().borrow_mut();
                 to_tasks.push(task);
@@ -390,7 +408,7 @@ impl<'a> App<'a> {
         let mut stmt = self
             .db
             .prepare("SELECT state, title, description FROM tasks WHERE id = ?")?;
-        let task = stmt.query_row([id as i64], |r| {
+        let mut task = stmt.query_row([id as i64], |r| {
             Ok(Task {
                 id: Some(id),
                 state: r.get::<usize, i32>(0)?.into(),
@@ -399,61 +417,78 @@ impl<'a> App<'a> {
                 tags: Vec::new(),
             })
         })?;
+        stmt = self.db.prepare("SELECT tag FROM tags WHERE task_id = ?")?;
+        for row in stmt.query_map([id as i64], |r| Ok(r.get(0)?))? {
+            task.tags.push(row?);
+        }
         Ok(task)
     }
 
-    fn save_task(&mut self, task: Task) -> Result<TaskMeta> {
+    fn update_task_state(&self, state: TaskState, id: u64) -> Result<()> {
+        self.db
+            .execute(
+                "UPDATE tasks SET state = ? WHERE id = ?",
+                params![state as i32, id as i64],
+            )
+            .context("updating task state")?;
+        Ok(())
+    }
+
+    fn save_task(&mut self, task: &Task) -> Result<TaskMeta> {
         let (sql, params) = match task.id {
             Some(id) => (
                 "UPDATE tasks SET state=?,title=?,description=? WHERE id=?",
                 params![task.state as i32, task.title, task.description, id as i64],
             ),
             None => (
-                "INSERT INTO tasks SET state=?,title=?,description=?",
+                "INSERT INTO tasks (state, title, description) VALUES (?, ?, ?)",
                 params![task.state as i32, task.title, task.description],
             ),
         };
 
         let tx = self.db.transaction().context("starting transaction")?;
-
-        tx.execute(sql, params).context("saving task")?;
-        let id = match task.id {
-            Some(id) => id,
-            None => tx.last_insert_rowid() as u64,
-        };
-
-        let mut stmt = tx
-            .prepare("SELECT tag FROM tags WHERE task_id=?")
-            .context("querying tags")?;
-        let mut old_tags: HashSet<String> = HashSet::new();
-        for row in stmt
-            .query_map([id as i64], |r| Ok(r.get(0)?))
-            .context("querying tags")?
+        let id;
         {
-            old_tags.insert(row?);
-        }
-        let new_tags = HashSet::from_iter(task.tags.iter().map(|x| x.clone()));
-        let tags_to_remove = old_tags.difference(&new_tags);
-        let tags_to_add = new_tags.difference(&old_tags);
-        let mut stmt = tx
-            .prepare("INSERT INTO tags (tag, task_id) VALUES (?)")
-            .context("inserting new task tags")?;
-        for tag in tags_to_add {
-            stmt.execute(params![tag, id as i64])
-                .context("inserting new tags")?;
-        }
-        let mut stmt = tx
-            .prepare("DELETE FROM tags WHERE tag = ? AND id = ?")
-            .context("removing task old tags")?;
-        for tag in tags_to_remove {
-            stmt.execute(params![tag, id as i64])
+            tx.execute(sql, params).context("saving task")?;
+            id = match task.id {
+                Some(id) => id,
+                None => tx.last_insert_rowid() as u64,
+            };
+
+            let mut stmt = tx
+                .prepare("SELECT tag FROM tags WHERE task_id=?")
+                .context("querying tags")?;
+            let mut old_tags: HashSet<String> = HashSet::new();
+            for row in stmt
+                .query_map([id as i64], |r| Ok(r.get(0)?))
+                .context("querying tags")?
+            {
+                old_tags.insert(row?);
+            }
+            let new_tags = HashSet::from_iter(task.tags.iter().map(|x| x.clone()));
+            let tags_to_remove = old_tags.difference(&new_tags);
+            let tags_to_add = new_tags.difference(&old_tags);
+            let mut stmt = tx
+                .prepare("INSERT INTO tags (tag, task_id) VALUES (?, ?)")
+                .context("inserting new task tags")?;
+            for tag in tags_to_add {
+                stmt.execute(params![tag, id as i64])
+                    .context("inserting new tags")?;
+            }
+            let mut stmt = tx
+                .prepare("DELETE FROM tags WHERE tag = ? AND task_id = ?")
                 .context("removing task old tags")?;
+            for tag in tags_to_remove {
+                stmt.execute(params![tag, id as i64])
+                    .context("removing task old tags")?;
+            }
         }
+        tx.commit()?;
 
         Ok(TaskMeta {
             id: Some(id),
             state: task.state,
-            title: task.title,
+            title: task.title.clone(),
         })
     }
 }
