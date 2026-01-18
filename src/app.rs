@@ -316,6 +316,7 @@ impl<'a> App<'a> {
                         return None;
                     }
                 };
+                self.model.running_state = RunningState::MainView;
                 let mut tasks = self
                     .model
                     .tasks
@@ -329,7 +330,6 @@ impl<'a> App<'a> {
                     }
                 }
                 tasks.push(task_meta);
-                self.model.running_state = RunningState::MainView;
             }
             Message::MoveTask(to_state) => {
                 let from_state = self.model.lanes[self.model.active_lane].for_state;
