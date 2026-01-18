@@ -6,7 +6,7 @@ use crate::{lane_widget, task_widget::TaskView};
 
 #[derive(Debug)]
 pub(crate) struct Model<'a> {
-    pub(crate) tasks: HashMap<TaskState, Rc<RefCell<Vec<Task>>>>,
+    pub(crate) tasks: HashMap<TaskState, Rc<RefCell<Vec<TaskMeta>>>>,
     pub(crate) running_state: RunningState,
 
     // used by MainView
@@ -14,6 +14,13 @@ pub(crate) struct Model<'a> {
     pub(crate) lanes: Vec<LaneList>,
 
     pub(crate) task_view: Option<TaskView<'a>>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq)]
+pub(crate) struct TaskMeta {
+    pub(crate) id: Option<u64>,
+    pub(crate) state: TaskState,
+    pub(crate) title: String,
 }
 
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -58,6 +65,17 @@ impl From<TaskState> for String {
             TaskState::Done => "Done",
         }
         .to_string()
+    }
+}
+
+impl From<i32> for TaskState {
+    fn from(value: i32) -> Self {
+        match value {
+            1 => Self::InProgress,
+            2 => Self::Blocked,
+            3 => Self::Done,
+            _ => Self::Todo,
+        }
     }
 }
 

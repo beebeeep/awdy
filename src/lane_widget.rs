@@ -9,17 +9,20 @@ use ratatui::{
 };
 use tui_widget_list::{ListBuilder, ListState, ListView};
 
-use crate::{color_scheme::COLOR_SCHEME, model::Task};
+use crate::{
+    color_scheme::COLOR_SCHEME,
+    model::{Task, TaskMeta},
+};
 
 #[derive(Debug)]
 pub(crate) struct LaneState {
     pub(crate) list_state: ListState,
     pub(crate) active: bool,
-    pub(crate) tasks: Rc<RefCell<Vec<Task>>>,
+    pub(crate) tasks: Rc<RefCell<Vec<TaskMeta>>>,
 }
 
 impl LaneState {
-    pub(crate) fn new(active: bool, tasks: Rc<RefCell<Vec<Task>>>) -> Self {
+    pub(crate) fn new(active: bool, tasks: Rc<RefCell<Vec<TaskMeta>>>) -> Self {
         Self {
             active,
             list_state: ListState::default(),
