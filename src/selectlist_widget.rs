@@ -1,7 +1,7 @@
 use ratatui::{
-    style::{Modifier, Style},
+    style::{Modifier, Style, Stylize},
     text::Text,
-    widgets::{Block, BorderType, StatefulWidget, Widget},
+    widgets::{Block, BorderType, Borders, Padding, StatefulWidget, Widget},
 };
 use tui_widget_list::{ListBuilder, ListState, ListView};
 
@@ -10,11 +10,11 @@ use crate::color_scheme::COLOR_SCHEME;
 pub(crate) struct SelectListState {
     pub(crate) list_state: ListState,
     pub(crate) items: Vec<(String, bool)>,
-    pub(crate) active: bool,
 }
 
 pub(crate) struct SelectList {
     pub(crate) title: String,
+    pub(crate) inactive: bool,
 }
 
 impl StatefulWidget for &SelectList {
@@ -35,33 +35,40 @@ impl StatefulWidget for &SelectList {
                 .fg(COLOR_SCHEME.text_fg)
                 .bg(COLOR_SCHEME.text_bg);
             if item.1 {
-                style = style.add_modifier(Modifier::REVERSED);
+                style = style.bold();
             }
-            let mut item = Text::from(item.0.clone()).style(style);
-            if context.is_selected && state.active {
+            let mut item =
+                Text::from(format!("[{}] {}", if item.1 { "x" } else { " " }, item.0)).style(style);
+            if !self.inactive && context.is_selected {
                 item.style = item
                     .style
-                    .fg(COLOR_SCHEME.text_selected_fg)
-                    .bg(COLOR_SCHEME.text_selected_bg);
+                    .fg(COLOR_SCHEME.cursor_fg)
+                    .bg(COLOR_SCHEME.cursor_bg);
             }
             (item, 1)
         });
         let list = ListView::new(builder, state.items.len());
         let mut block = Block::bordered()
             .title(self.title.clone())
-            .title_alignment(ratatui::layout::Alignment::Left);
+            .title_alignment(ratatui::layout::Alignment::Center)
+            // .borders(Borders::RIGHT | Borders::TOP)
+            .border_type(BorderType::Thick);
 
         let mut block_title_style = Style::default()
+            .bold()
             .fg(COLOR_SCHEME.lane_title_fg)
             .bg(COLOR_SCHEME.lane_title_bg);
-        if state.active {
-            block = block.border_type(BorderType::Double);
+        let block_border_style = Style::default()
+            .fg(COLOR_SCHEME.text_fg)
+            .bg(COLOR_SCHEME.text_bg);
+        if !self.inactive {
             block_title_style = block_title_style
-                .add_modifier(Modifier::BOLD)
                 .fg(COLOR_SCHEME.lane_active_title_fg)
                 .bg(COLOR_SCHEME.lane_active_title_bg);
         }
-        block = block.title_style(block_title_style);
+        block = block
+            .title_style(block_title_style)
+            .border_style(block_border_style);
         let list_area = block.inner(area);
         block.render(area, buf);
         list.render(list_area, buf, &mut state.list_state);

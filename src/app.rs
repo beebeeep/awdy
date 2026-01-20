@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, anyhow};
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, params, params_from_iter};
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
@@ -21,7 +21,7 @@ use crate::{
     color_scheme::COLOR_SCHEME,
     error_widget::ErrorWidget,
     lane_widget::{LaneState, LaneWidget},
-    model::{LaneList, Message, Model, RunningState, Task, TaskMeta, TaskState},
+    model::{LaneList, Message, Model, RunningState, SelectedPane, Task, TaskMeta, TaskState},
     selectlist_widget::{SelectList, SelectListState},
     task_widget::TaskView,
 };
@@ -58,31 +58,6 @@ impl<'a> App<'a> {
             )
             .context("initializing database")?;
             let mut stmt = db
-                .prepare("SELECT id, state, title FROM tasks")
-                .context("loading tasks")?;
-            let rows = stmt
-                .query_map([], |r| {
-                    Ok(TaskMeta {
-                        id: Some(r.get::<usize, i64>(0)? as u64),
-                        state: r.get::<usize, i32>(1)?.into(),
-                        title: r.get(2)?,
-                    })
-                })
-                .context("reading tasks from DB")?;
-            for result in rows {
-                let task = result.context("decoding task")?;
-                match tasks.get_mut(&task.state) {
-                    None => {
-                        tasks.insert(task.state, Rc::new(RefCell::new(vec![task])));
-                    }
-                    Some(v) => {
-                        let mut v = v.borrow_mut();
-                        v.push(task);
-                    }
-                }
-            }
-
-            let mut stmt = db
                 .prepare("SELECT DISTINCT tag FROM tags ORDER BY tag DESC")
                 .context("loading tags")?;
             let rows = stmt
@@ -112,22 +87,26 @@ impl<'a> App<'a> {
         let tags_list = SelectListState {
             list_state: ListState::default(),
             items: tags.into_iter().map(|v| (v, false)).collect(),
-            active: false,
         };
 
-        lanes[0].state.active = true;
-        Ok(Self {
+        lanes[0].state.selected = true;
+        let mut r = Self {
             db,
             model: Model {
                 active_lane: 0,
+                active_pane: SelectedPane::Lanes,
                 running_state: RunningState::MainView,
-                tags_list,
+                tags: tags_list,
                 tasks,
                 lanes,
                 task_view: None,
                 last_error: None,
             },
-        })
+        };
+
+        r.load_filtered_tasks()?;
+
+        Ok(r)
     }
 
     pub fn run(mut self) -> Result<()> {
@@ -180,8 +159,8 @@ impl<'a> App<'a> {
     }
 
     fn main_view(&mut self, frame: &mut Frame, area: Rect) {
-        let panes = Layout::horizontal([Constraint::Percentage(20), Constraint::Percentage(80)])
-            .split(area);
+        let panes =
+            Layout::horizontal([Constraint::Percentage(10), Constraint::Fill(1)]).split(area);
         let lane_areas = Layout::horizontal([
             Constraint::Percentage(25),
             Constraint::Percentage(25),
@@ -193,14 +172,16 @@ impl<'a> App<'a> {
         frame.render_stateful_widget(
             &SelectList {
                 title: "Tags".to_string(),
+                inactive: self.model.active_pane != SelectedPane::Tags,
             },
             panes[0],
-            &mut self.model.tags_list,
+            &mut self.model.tags,
         );
 
         for (lane, area) in self.model.lanes.iter_mut().zip(lane_areas.iter()) {
             let lane_widget = LaneWidget {
                 title: lane.for_state.into(),
+                inactive: self.model.active_pane != SelectedPane::Lanes,
             };
             frame.render_stateful_widget(&lane_widget, *area, &mut lane.state);
         }
@@ -245,11 +226,36 @@ impl<'a> App<'a> {
                 KeyCode::Char('2') => Some(Message::MoveTask(TaskState::InProgress)),
                 KeyCode::Char('3') => Some(Message::MoveTask(TaskState::Blocked)),
                 KeyCode::Char('4') => Some(Message::MoveTask(TaskState::Done)),
-                KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => Some(Message::NextLane),
-                KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => Some(Message::PrevLane),
-                KeyCode::Down | KeyCode::Char('j') => Some(Message::NextTask),
-                KeyCode::Up | KeyCode::Char('k') => Some(Message::PrevTask),
-                KeyCode::Enter => Some(Message::OpenTask),
+                KeyCode::Right | KeyCode::Char('l') => Some(Message::NextLane),
+                KeyCode::Left | KeyCode::Char('h') => Some(Message::PrevLane),
+                KeyCode::Tab => Some(Message::NextPane),
+                KeyCode::BackTab => Some(Message::PrevPane),
+                KeyCode::Down | KeyCode::Char('j')
+                    if self.model.active_pane == SelectedPane::Lanes =>
+                {
+                    Some(Message::NextTask)
+                }
+                KeyCode::Down | KeyCode::Char('j')
+                    if self.model.active_pane == SelectedPane::Tags =>
+                {
+                    Some(Message::NextTag)
+                }
+                KeyCode::Up | KeyCode::Char('k')
+                    if self.model.active_pane == SelectedPane::Lanes =>
+                {
+                    Some(Message::PrevTask)
+                }
+                KeyCode::Up | KeyCode::Char('k')
+                    if self.model.active_pane == SelectedPane::Tags =>
+                {
+                    Some(Message::PrevTag)
+                }
+                KeyCode::Enter if self.model.active_pane == SelectedPane::Lanes => {
+                    Some(Message::OpenTask)
+                }
+                KeyCode::Char(' ') if self.model.active_pane == SelectedPane::Tags => {
+                    Some(Message::ToggleTag)
+                }
                 _ => None,
             },
             RunningState::TaskView => match key {
@@ -281,16 +287,32 @@ impl<'a> App<'a> {
                 self.model.running_state = RunningState::Done;
             }
             Message::CloseError => self.model.last_error = None,
+            Message::NextPane => match self.model.active_pane {
+                SelectedPane::Lanes => {
+                    self.model.active_pane = SelectedPane::Tags;
+                }
+                SelectedPane::Tags => {
+                    self.model.active_pane = SelectedPane::Lanes;
+                }
+            },
+            Message::PrevPane => match self.model.active_pane {
+                SelectedPane::Lanes => {
+                    self.model.active_pane = SelectedPane::Tags;
+                }
+                SelectedPane::Tags => {
+                    self.model.active_pane = SelectedPane::Lanes;
+                }
+            },
             Message::NextLane => {
-                self.model.lanes[self.model.active_lane].state.active = false;
+                self.model.lanes[self.model.active_lane].state.selected = false;
                 self.model.active_lane = (self.model.active_lane + 1) % self.model.lanes.len();
-                self.model.lanes[self.model.active_lane].state.active = true;
+                self.model.lanes[self.model.active_lane].state.selected = true;
             }
             Message::PrevLane => {
-                self.model.lanes[self.model.active_lane].state.active = false;
+                self.model.lanes[self.model.active_lane].state.selected = false;
                 self.model.active_lane =
                     (self.model.active_lane + self.model.lanes.len() - 1) % self.model.lanes.len();
-                self.model.lanes[self.model.active_lane].state.active = true;
+                self.model.lanes[self.model.active_lane].state.selected = true;
             }
             Message::NextTask => {
                 self.model.lanes[self.model.active_lane]
@@ -304,6 +326,20 @@ impl<'a> App<'a> {
                     .list_state
                     .previous();
             }
+            Message::NextTag => {
+                self.model.tags.list_state.next();
+            }
+            Message::PrevTag => {
+                self.model.tags.list_state.previous();
+            }
+            Message::ToggleTag => {
+                if let Some(idx) = self.model.tags.list_state.selected {
+                    self.model.tags.items[idx].1 ^= true;
+                    if let Err(e) = self.load_filtered_tasks() {
+                        self.model.last_error = Some(e);
+                    }
+                }
+            }
             Message::OpenTask => {
                 let selected_task = self.model.lanes[self.model.active_lane]
                     .state
@@ -316,6 +352,9 @@ impl<'a> App<'a> {
                     .get(&self.model.lanes[self.model.active_lane].for_state)
                     .unwrap()
                     .borrow();
+                if lane_tasks.is_empty() {
+                    return None;
+                }
                 self.model.task_view = match self.load_task(lane_tasks[selected_task].id.unwrap()) {
                     Ok(t) => Some(t.into()),
                     Err(e) => {
@@ -431,6 +470,71 @@ impl<'a> App<'a> {
             },
         };
         None
+    }
+
+    fn load_filtered_tasks(&mut self) -> Result<()> {
+        for state in [
+            TaskState::Todo,
+            TaskState::InProgress,
+            TaskState::Blocked,
+            TaskState::Done,
+        ] {
+            self.model
+                .tasks
+                .get_mut(&state)
+                .unwrap()
+                .borrow_mut()
+                .truncate(0);
+        }
+
+        let tags: Vec<_> = self
+            .model
+            .tags
+            .items
+            .iter()
+            .filter(|x| x.1)
+            .map(|x| x.0.clone())
+            .collect();
+        let placeholders = std::iter::repeat("?")
+            .take(tags.len())
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = if tags.is_empty() {
+            // All tasks except those with "Archive" tag
+            "SELECT id, state, title FROM tasks WHERE
+                NOT EXISTS (SELECT 1 FROM tags WHERE tags.task_id = tasks.id AND tags.tag = 'Archive')"
+        } else {
+            &format!(
+                "SELECT id, state, title FROM tasks JOIN tags ON tags.task_id = tasks.id WHERE tags.tag IN ({})",
+                placeholders
+            )
+        };
+        let mut stmt = self.db.prepare(sql)?;
+        let rows = stmt
+            .query_map(params_from_iter(tags), |r| {
+                Ok(TaskMeta {
+                    id: Some(r.get::<usize, i64>(0)? as u64),
+                    state: r.get::<usize, i32>(1)?.into(),
+                    title: r.get(2)?,
+                })
+            })
+            .context("reading tasks from DB")?;
+        for row in rows {
+            let task = row.context("decoding task")?;
+            self.model
+                .tasks
+                .get_mut(&task.state)
+                .unwrap()
+                .borrow_mut()
+                .push(task);
+        }
+
+        // reset focus in task lists
+        for lane in &mut self.model.lanes {
+            lane.state.list_state.selected = Some(0);
+        }
+
+        Ok(())
     }
 
     fn load_task(&self, id: u64) -> Result<Task> {

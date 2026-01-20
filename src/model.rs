@@ -8,9 +8,10 @@ pub(crate) struct Model<'a> {
     pub(crate) tasks: HashMap<TaskState, Rc<RefCell<Vec<TaskMeta>>>>,
     pub(crate) running_state: RunningState,
 
+    pub(crate) active_pane: SelectedPane,
     pub(crate) active_lane: usize,
     pub(crate) lanes: Vec<LaneList>,
-    pub(crate) tags_list: SelectListState,
+    pub(crate) tags: SelectListState,
 
     pub(crate) task_view: Option<TaskView<'a>>,
     pub(crate) last_error: Option<anyhow::Error>,
@@ -29,7 +30,6 @@ pub(crate) struct Task {
     pub(crate) state: TaskState,
     pub(crate) title: String,
     pub(crate) description: Option<String>,
-    // pub(crate) assignees: Vec<String>,
     pub(crate) tags: Vec<String>,
 }
 
@@ -38,6 +38,12 @@ pub(crate) struct LaneList {
     pub(crate) state: lane_widget::LaneState,
 }
 
+#[derive(Default, PartialEq)]
+pub(crate) enum SelectedPane {
+    #[default]
+    Lanes,
+    Tags,
+}
 #[derive(Default, PartialEq)]
 pub(crate) enum RunningState {
     #[default]
@@ -90,10 +96,15 @@ impl From<i32> for TaskState {
 #[derive(PartialEq)]
 pub(crate) enum Message {
     KeyPress(KeyEvent),
+    NextPane,
+    PrevPane,
     NextLane,
     PrevLane,
     NextTask,
     PrevTask,
+    NextTag,
+    PrevTag,
+    ToggleTag,
     NewTask,
     OpenTask,
     CloseTask,
