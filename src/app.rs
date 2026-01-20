@@ -21,9 +21,8 @@ use crate::{
     color_scheme::COLOR_SCHEME,
     error_widget::ErrorWidget,
     lane_widget::{LaneState, LaneWidget},
-    model::{LaneList, Message, Model, RunningState, SelectedPane, Task, TaskMeta, TaskState},
+    model::{Message, Model, RunningState, SelectedPane, Task, TaskMeta, TaskState},
     selectlist_widget::{SelectList, SelectListState},
-    task_widget::TaskView,
 };
 
 pub struct App<'a> {
@@ -65,13 +64,8 @@ impl<'a> App<'a> {
             TaskState::Blocked,
             TaskState::Done,
         ] {
-            if !tasks.contains_key(&state) {
-                tasks.insert(state, Rc::new(RefCell::new(Vec::new())));
-            }
-            lanes.push(LaneList {
-                for_state: state,
-                state: LaneState::new(false, tasks.get(&state).unwrap().clone()),
-            });
+            tasks.insert(state, Vec::new());
+            lanes.push(LaneState::new());
         }
 
         let tags_list = SelectListState {
@@ -79,7 +73,7 @@ impl<'a> App<'a> {
             items: Vec::new(),
         };
 
-        lanes[0].state.selected = true;
+        lanes[0].selected = true;
         let mut r = Self {
             db,
             model: Model {
@@ -169,12 +163,20 @@ impl<'a> App<'a> {
             &mut self.model.tags,
         );
 
-        for (lane, area) in self.model.lanes.iter_mut().zip(lane_areas.iter()) {
+        for ((idx, mut lane), area) in self
+            .model
+            .lanes
+            .iter_mut()
+            .enumerate()
+            .zip(lane_areas.iter())
+        {
+            let state = TaskState::from(idx as i32);
             let lane_widget = LaneWidget {
-                title: lane.for_state.into(),
+                title: state.into(),
                 inactive: self.model.active_pane != SelectedPane::Lanes,
+                tasks: self.model.tasks.get(&state).unwrap(),
             };
-            frame.render_stateful_widget(&lane_widget, *area, &mut lane.state);
+            frame.render_stateful_widget(&lane_widget, *area, &mut lane);
         }
     }
 
@@ -297,25 +299,21 @@ impl<'a> App<'a> {
                 }
             },
             Message::NextLane => {
-                self.model.lanes[self.model.active_lane].state.selected = false;
+                self.model.lanes[self.model.active_lane].selected = false;
                 self.model.active_lane = (self.model.active_lane + 1) % self.model.lanes.len();
-                self.model.lanes[self.model.active_lane].state.selected = true;
+                self.model.lanes[self.model.active_lane].selected = true;
             }
             Message::PrevLane => {
-                self.model.lanes[self.model.active_lane].state.selected = false;
+                self.model.lanes[self.model.active_lane].selected = false;
                 self.model.active_lane =
                     (self.model.active_lane + self.model.lanes.len() - 1) % self.model.lanes.len();
-                self.model.lanes[self.model.active_lane].state.selected = true;
+                self.model.lanes[self.model.active_lane].selected = true;
             }
             Message::NextTask => {
-                self.model.lanes[self.model.active_lane]
-                    .state
-                    .list_state
-                    .next();
+                self.model.lanes[self.model.active_lane].list_state.next();
             }
             Message::PrevTask => {
                 self.model.lanes[self.model.active_lane]
-                    .state
                     .list_state
                     .previous();
             }
@@ -334,17 +332,12 @@ impl<'a> App<'a> {
                 }
             }
             Message::OpenTask => {
+                let state = TaskState::from(self.model.active_lane as i32);
                 let selected_task = self.model.lanes[self.model.active_lane]
-                    .state
                     .list_state
                     .selected
                     .unwrap();
-                let lane_tasks = self
-                    .model
-                    .tasks
-                    .get(&self.model.lanes[self.model.active_lane].for_state)
-                    .unwrap()
-                    .borrow();
+                let lane_tasks = self.model.tasks.get(&state).unwrap();
                 if lane_tasks.is_empty() {
                     return None;
                 }
@@ -359,7 +352,7 @@ impl<'a> App<'a> {
             }
             Message::NewTask => {
                 let mut task = Task::default();
-                task.state = self.model.lanes[self.model.active_lane].for_state;
+                task.state = TaskState::from(self.model.active_lane as i32);
                 self.model.task_view = Some(task.into());
                 self.model.running_state = RunningState::TaskView;
             }
@@ -368,8 +361,8 @@ impl<'a> App<'a> {
                 self.model.task_view = None;
             }
             Message::SaveTask => {
-                let task: Task = self.model.task_view.take().unwrap().into();
-                let task_meta = match self.save_task(&task).context("saving task") {
+                let mut task: Task = self.model.task_view.take().unwrap().into();
+                match self.save_task(&mut task).context("saving task") {
                     Ok(t) => t,
                     Err(e) => {
                         self.model.last_error = Some(e);
@@ -384,38 +377,31 @@ impl<'a> App<'a> {
                 }
 
                 self.model.running_state = RunningState::MainView;
-                let mut tasks = self
-                    .model
-                    .tasks
-                    .get_mut(&task_meta.state)
-                    .unwrap()
-                    .borrow_mut();
+                let tasks = self.model.tasks.get_mut(&task.state).unwrap();
                 for existing_task in tasks.iter_mut() {
-                    if task_meta.id == existing_task.id {
-                        *existing_task = task_meta;
+                    if task.id == existing_task.id {
+                        *existing_task = task;
                         return None;
                     }
                 }
-                tasks.push(task_meta);
+                tasks.push(task);
             }
             Message::MoveTask(to_state) => {
-                let from_state = self.model.lanes[self.model.active_lane].for_state;
+                let from_state = TaskState::from(self.model.active_lane as i32);
                 if to_state == from_state {
                     return None;
                 }
-                let selected_task = match self.model.lanes[self.model.active_lane]
-                    .state
-                    .list_state
-                    .selected
-                {
-                    Some(v) => v,
-                    None => return None,
-                };
-                let mut from_tasks = self.model.tasks.get(&from_state).unwrap().borrow_mut();
+                let selected_task =
+                    match self.model.lanes[self.model.active_lane].list_state.selected {
+                        Some(v) => v,
+                        None => return None,
+                    };
+
+                // first, update the db
+                let from_tasks = self.model.tasks.get(&from_state).unwrap();
                 if from_tasks.len() == 0 {
                     return None;
                 }
-
                 match self.update_task_state(to_state, from_tasks[selected_task].id.unwrap()) {
                     Ok(_) => {}
                     Err(e) => {
@@ -424,24 +410,19 @@ impl<'a> App<'a> {
                     }
                 };
 
-                let task = from_tasks.remove(selected_task);
-                let mut to_tasks = self.model.tasks.get(&to_state).unwrap().borrow_mut();
-                to_tasks.push(task);
-
+                // next, update current view in place
+                let from_tasks = self.model.tasks.get_mut(&from_state).unwrap();
                 // move focus upwards if last task in list was selected
-                match self.model.lanes[self.model.active_lane]
-                    .state
-                    .list_state
-                    .selected
-                {
+                match self.model.lanes[self.model.active_lane].list_state.selected {
                     Some(idx) if idx >= from_tasks.len() => {
                         self.model.lanes[self.model.active_lane]
-                            .state
                             .list_state
                             .select(Some(from_tasks.len().saturating_sub(1)));
                     }
                     _ => {}
                 }
+                let task = from_tasks.remove(selected_task);
+                self.model.tasks.get_mut(&to_state).unwrap().push(task);
             }
             Message::FocusNext => match self.model.running_state {
                 RunningState::TaskView => {
@@ -478,12 +459,7 @@ impl<'a> App<'a> {
             TaskState::Blocked,
             TaskState::Done,
         ] {
-            self.model
-                .tasks
-                .get_mut(&state)
-                .unwrap()
-                .borrow_mut()
-                .truncate(0);
+            self.model.tasks.get_mut(&state).unwrap().truncate(0);
         }
 
         let tags: Vec<_> = self
@@ -500,37 +476,42 @@ impl<'a> App<'a> {
             .join(",");
         let sql = if tags.is_empty() {
             // All tasks except those with "Archive" tag
-            "SELECT id, state, title FROM tasks WHERE
+            "SELECT id, state, title, description FROM tasks WHERE
                 NOT EXISTS (SELECT 1 FROM tags WHERE tags.task_id = tasks.id AND tags.tag = 'Archive')"
         } else {
             &format!(
-                "SELECT id, state, title FROM tasks JOIN tags ON tags.task_id = tasks.id WHERE tags.tag IN ({})",
+                "SELECT id, state, title, description FROM tasks JOIN tags ON tags.task_id = tasks.id WHERE tags.tag IN ({})",
                 placeholders
             )
         };
-        let mut stmt = self.db.prepare(sql)?;
-        let rows = stmt
-            .query_map(params_from_iter(tags), |r| {
-                Ok(TaskMeta {
-                    id: Some(r.get::<usize, i64>(0)? as u64),
-                    state: r.get::<usize, i32>(1)?.into(),
-                    title: r.get(2)?,
+        let tx = self.db.transaction().context("loading tasks from DB")?;
+        {
+            let mut stmt = tx.prepare(sql)?;
+            let rows = stmt
+                .query_map(params_from_iter(tags), |r| {
+                    Ok(Task {
+                        id: Some(r.get::<usize, i64>(0)? as u64),
+                        state: r.get::<usize, i32>(1)?.into(),
+                        title: r.get(2)?,
+                        description: r.get(3)?,
+                        tags: Vec::new(),
+                    })
                 })
-            })
-            .context("reading tasks from DB")?;
-        for row in rows {
-            let task = row.context("decoding task")?;
-            self.model
-                .tasks
-                .get_mut(&task.state)
-                .unwrap()
-                .borrow_mut()
-                .push(task);
+                .context("reading tasks from DB")?;
+            for row in rows {
+                let mut task = row.context("decoding task")?;
+                let mut stmt = tx.prepare("SELECT tag FROM tags WHERE task_id = ?")?;
+                for tag_row in stmt.query_map([task.id.unwrap() as i64], |r| Ok(r.get(0)?))? {
+                    task.tags.push(tag_row?);
+                }
+                self.model.tasks.get_mut(&task.state).unwrap().push(task);
+            }
         }
+        tx.commit()?;
 
         // reset focus in task lists
         for lane in &mut self.model.lanes {
-            lane.state.list_state.selected = Some(0);
+            lane.list_state.selected = Some(0);
         }
 
         Ok(())
@@ -591,7 +572,8 @@ impl<'a> App<'a> {
         Ok(())
     }
 
-    fn save_task(&mut self, task: &Task) -> Result<TaskMeta> {
+    // save_task persists task in DB. Sets task.id if needed
+    fn save_task(&mut self, task: &mut Task) -> Result<()> {
         let (sql, params) = match task.id {
             Some(id) => (
                 "UPDATE tasks SET state=?,title=?,description=? WHERE id=?",
@@ -642,10 +624,7 @@ impl<'a> App<'a> {
         }
         tx.commit()?;
 
-        Ok(TaskMeta {
-            id: Some(id),
-            state: task.state,
-            title: task.title.clone(),
-        })
+        task.id = Some(id);
+        Ok(())
     }
 }

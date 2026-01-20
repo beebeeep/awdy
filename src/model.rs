@@ -2,15 +2,15 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use ratatui::crossterm::event::KeyEvent;
 
-use crate::{lane_widget, selectlist_widget::SelectListState, task_widget::TaskView};
+use crate::{lane_widget::LaneState, selectlist_widget::SelectListState, task_widget::TaskView};
 
 pub(crate) struct Model<'a> {
-    pub(crate) tasks: HashMap<TaskState, Rc<RefCell<Vec<TaskMeta>>>>,
+    pub(crate) tasks: HashMap<TaskState, Vec<Task>>,
     pub(crate) running_state: RunningState,
 
     pub(crate) active_pane: SelectedPane,
     pub(crate) active_lane: usize,
-    pub(crate) lanes: Vec<LaneList>,
+    pub(crate) lanes: Vec<LaneState>,
     pub(crate) tags: SelectListState,
 
     pub(crate) task_view: Option<TaskView<'a>>,
@@ -31,11 +31,6 @@ pub(crate) struct Task {
     pub(crate) title: String,
     pub(crate) description: Option<String>,
     pub(crate) tags: Vec<String>,
-}
-
-pub(crate) struct LaneList {
-    pub(crate) for_state: TaskState,
-    pub(crate) state: lane_widget::LaneState,
 }
 
 #[derive(Default, PartialEq)]
@@ -70,7 +65,7 @@ impl From<Task> for TaskMeta {
         }
     }
 }
-impl From<TaskState> for String {
+impl From<TaskState> for &'static str {
     fn from(t: TaskState) -> Self {
         match t {
             TaskState::Todo => "TODO",
@@ -78,7 +73,6 @@ impl From<TaskState> for String {
             TaskState::Blocked => "Blocked",
             TaskState::Done => "Done",
         }
-        .to_string()
     }
 }
 
