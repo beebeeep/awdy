@@ -241,7 +241,9 @@ impl<'a> App<'a> {
                 {
                     Some(Message::PrevTag)
                 }
-                KeyCode::Enter if self.model.active_pane == SelectedPane::Lanes => {
+                KeyCode::Enter | KeyCode::Char('e')
+                    if self.model.active_pane == SelectedPane::Lanes =>
+                {
                     Some(Message::OpenTask)
                 }
                 KeyCode::Char(' ') if self.model.active_pane == SelectedPane::Tags => {

@@ -13,5 +13,5 @@ pub(crate) fn centered_rect(parent: Rect, horizontal_pct: u16, vertical_pct: u16
 
 pub(crate) fn is_newline(e: KeyEvent) -> bool {
     e.code == KeyCode::Enter
-        || (e.code == KeyCode::Char('m') || e.modifiers == KeyModifiers::CONTROL)
+        || (e.code == KeyCode::Char('m') && e.modifiers == KeyModifiers::CONTROL)
 }

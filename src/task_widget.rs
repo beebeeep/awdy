@@ -64,16 +64,19 @@ impl<'a> TaskView<'a> {
         self.active_text_area = (self.active_text_area + 1) % self.text_areas.len();
         self.on_focus_change();
     }
+
     pub(crate) fn prev_field(&mut self) {
         self.active_text_area =
             (self.active_text_area + self.text_areas.len() - 1) % self.text_areas.len();
         self.on_focus_change();
     }
+
     pub(crate) fn process_event(&mut self, event: KeyEvent) {
         if (self.active_text_area == Self::TITLE || self.active_text_area == Self::TAGS)
             && is_newline(event)
         {
             self.next_field();
+            return;
         }
         self.text_areas[self.active_text_area].input(event);
     }
