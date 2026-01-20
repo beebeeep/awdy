@@ -2,29 +2,28 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use ratatui::crossterm::event::KeyEvent;
 
-use crate::{lane_widget, task_widget::TaskView};
+use crate::{lane_widget, selectlist_widget::SelectListState, task_widget::TaskView};
 
-#[derive(Debug)]
 pub(crate) struct Model<'a> {
     pub(crate) tasks: HashMap<TaskState, Rc<RefCell<Vec<TaskMeta>>>>,
     pub(crate) running_state: RunningState,
 
-    // used by MainView
     pub(crate) active_lane: usize,
     pub(crate) lanes: Vec<LaneList>,
+    pub(crate) tags_list: SelectListState,
 
     pub(crate) task_view: Option<TaskView<'a>>,
     pub(crate) last_error: Option<anyhow::Error>,
 }
 
-#[derive(Debug, Default, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub(crate) struct TaskMeta {
     pub(crate) id: Option<u64>,
     pub(crate) state: TaskState,
     pub(crate) title: String,
 }
 
-#[derive(Debug, Default, Clone, PartialEq)]
+#[derive(Default, Clone, PartialEq)]
 pub(crate) struct Task {
     pub(crate) id: Option<u64>,
     pub(crate) state: TaskState,
@@ -34,13 +33,12 @@ pub(crate) struct Task {
     pub(crate) tags: Vec<String>,
 }
 
-#[derive(Debug)]
 pub(crate) struct LaneList {
     pub(crate) for_state: TaskState,
     pub(crate) state: lane_widget::LaneState,
 }
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Default, PartialEq)]
 pub(crate) enum RunningState {
     #[default]
     MainView,
@@ -48,7 +46,7 @@ pub(crate) enum RunningState {
     Done,
 }
 
-#[derive(Hash, Debug, Default, Clone, Copy, PartialEq, PartialOrd, Eq, Ord)]
+#[derive(Hash, Default, Clone, Copy, PartialEq, PartialOrd, Eq, Ord)]
 pub(crate) enum TaskState {
     #[default]
     Todo = 0,

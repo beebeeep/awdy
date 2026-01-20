@@ -1,58 +1,24 @@
-use std::{cell::RefCell, rc::Rc};
-
 use ratatui::{
-    buffer::Buffer,
-    layout::Rect,
     style::{Modifier, Style},
-    text::Line,
+    text::Text,
     widgets::{Block, BorderType, StatefulWidget, Widget},
 };
 use tui_widget_list::{ListBuilder, ListState, ListView};
 
-use crate::{color_scheme::COLOR_SCHEME, model::TaskMeta};
+use crate::color_scheme::COLOR_SCHEME;
 
-pub(crate) struct LaneState {
+pub(crate) struct SelectListState {
     pub(crate) list_state: ListState,
+    pub(crate) items: Vec<(String, bool)>,
     pub(crate) active: bool,
-    pub(crate) tasks: Rc<RefCell<Vec<TaskMeta>>>,
 }
 
-impl LaneState {
-    pub(crate) fn new(active: bool, tasks: Rc<RefCell<Vec<TaskMeta>>>) -> Self {
-        Self {
-            active,
-            list_state: ListState::default(),
-            tasks,
-        }
-    }
-}
-
-pub struct LaneItem {
-    text: String,
-    style: Style,
-}
-
-impl LaneItem {
-    pub fn new<T: Into<String>>(text: T) -> Self {
-        Self {
-            text: text.into(),
-            style: Style::default(),
-        }
-    }
-}
-
-impl Widget for LaneItem {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        Line::from(self.text).style(self.style).render(area, buf);
-    }
-}
-
-pub(crate) struct LaneWidget {
+pub(crate) struct SelectList {
     pub(crate) title: String,
 }
 
-impl StatefulWidget for &LaneWidget {
-    type State = LaneState;
+impl StatefulWidget for &SelectList {
+    type State = SelectListState;
 
     fn render(
         self,
@@ -63,15 +29,15 @@ impl StatefulWidget for &LaneWidget {
         if state.list_state.selected.is_none() {
             state.list_state.next();
         }
-        let tasks = state.tasks.borrow();
         let builder = ListBuilder::new(|context| {
-            let mut item = LaneItem::new(tasks[context.index].title.clone());
-            item.style = Style::default()
+            let item = &state.items[context.index];
+            let mut style = Style::default()
                 .fg(COLOR_SCHEME.text_fg)
                 .bg(COLOR_SCHEME.text_bg);
-            if context.index % 2 == 1 {
-                item.style = item.style.bg(COLOR_SCHEME.text_alt_bg);
+            if item.1 {
+                style = style.add_modifier(Modifier::REVERSED);
             }
+            let mut item = Text::from(item.0.clone()).style(style);
             if context.is_selected && state.active {
                 item.style = item
                     .style
@@ -80,10 +46,10 @@ impl StatefulWidget for &LaneWidget {
             }
             (item, 1)
         });
-        let list = ListView::new(builder, tasks.len());
+        let list = ListView::new(builder, state.items.len());
         let mut block = Block::bordered()
             .title(self.title.clone())
-            .title_alignment(ratatui::layout::Alignment::Center);
+            .title_alignment(ratatui::layout::Alignment::Left);
 
         let mut block_title_style = Style::default()
             .fg(COLOR_SCHEME.lane_title_fg)

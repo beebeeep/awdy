@@ -6,6 +6,7 @@ use std::{
     rc::Rc,
     time::Duration,
 };
+use tui_widget_list::ListState;
 
 use ratatui::{
     Frame,
@@ -21,6 +22,7 @@ use crate::{
     error_widget::ErrorWidget,
     lane_widget::{LaneState, LaneWidget},
     model::{LaneList, Message, Model, RunningState, Task, TaskMeta, TaskState},
+    selectlist_widget::{SelectList, SelectListState},
     task_widget::TaskView,
 };
 
@@ -33,6 +35,7 @@ impl<'a> App<'a> {
     pub fn load() -> Result<Self> {
         let mut tasks = HashMap::new();
         let db = Connection::open("awdy.db").context("opening database")?;
+        let mut tags = Vec::new();
 
         {
             db.execute(
@@ -47,8 +50,9 @@ impl<'a> App<'a> {
             .context("initializing database")?;
             db.execute(
                 "CREATE TABLE IF NOT EXISTS tags (
-                tag TEXT NOT NULL PRIMARY KEY,
-                task_id INTEGER NOT NULL
+                tag TEXT NOT NULL,
+                task_id INTEGER NOT NULL,
+                PRIMARY KEY (tag, task_id)
             )",
                 (),
             )
@@ -77,6 +81,16 @@ impl<'a> App<'a> {
                     }
                 }
             }
+
+            let mut stmt = db
+                .prepare("SELECT DISTINCT tag FROM tags ORDER BY tag DESC")
+                .context("loading tags")?;
+            let rows = stmt
+                .query_map([], |r| Ok(r.get(0)?))
+                .context("querying tags")?;
+            for row in rows {
+                tags.push(row?);
+            }
         }
 
         let mut lanes = Vec::with_capacity(4);
@@ -94,13 +108,20 @@ impl<'a> App<'a> {
                 state: LaneState::new(false, tasks.get(&state).unwrap().clone()),
             });
         }
-        lanes[0].state.active = true;
 
+        let tags_list = SelectListState {
+            list_state: ListState::default(),
+            items: tags.into_iter().map(|v| (v, false)).collect(),
+            active: false,
+        };
+
+        lanes[0].state.active = true;
         Ok(Self {
             db,
             model: Model {
                 active_lane: 0,
                 running_state: RunningState::MainView,
+                tags_list,
                 tasks,
                 lanes,
                 task_view: None,
@@ -159,17 +180,25 @@ impl<'a> App<'a> {
     }
 
     fn main_view(&mut self, frame: &mut Frame, area: Rect) {
-        let layout = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints(vec![
-                Constraint::Percentage(25),
-                Constraint::Percentage(25),
-                Constraint::Percentage(25),
-                Constraint::Percentage(25),
-            ])
+        let panes = Layout::horizontal([Constraint::Percentage(20), Constraint::Percentage(80)])
             .split(area);
+        let lane_areas = Layout::horizontal([
+            Constraint::Percentage(25),
+            Constraint::Percentage(25),
+            Constraint::Percentage(25),
+            Constraint::Percentage(25),
+        ])
+        .split(panes[1]);
 
-        for (lane, area) in self.model.lanes.iter_mut().zip(layout.iter()) {
+        frame.render_stateful_widget(
+            &SelectList {
+                title: "Tags".to_string(),
+            },
+            panes[0],
+            &mut self.model.tags_list,
+        );
+
+        for (lane, area) in self.model.lanes.iter_mut().zip(lane_areas.iter()) {
             let lane_widget = LaneWidget {
                 title: lane.for_state.into(),
             };

@@ -1,10 +1,10 @@
 use ratatui::{
     buffer::Buffer,
-    crossterm::event::{KeyCode, KeyEvent},
+    crossterm::event::KeyEvent,
     layout::{Constraint, Layout, Margin, Rect},
     style::{Modifier, Style, Stylize},
     text::Line,
-    widgets::{Block, BorderType, Borders, Clear, Widget},
+    widgets::{Block, BorderType, Clear, Widget},
 };
 use tui_textarea::{CursorMove, TextArea};
 
@@ -39,7 +39,6 @@ impl Widget for &LabeledEdit<'_, '_> {
     }
 }
 
-#[derive(Debug)]
 pub(crate) struct TaskView<'a> {
     pub(crate) task_id: Option<u64>,
     task_state: TaskState,
