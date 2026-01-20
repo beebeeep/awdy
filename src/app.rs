@@ -35,7 +35,6 @@ impl<'a> App<'a> {
     pub fn load() -> Result<Self> {
         let mut tasks = HashMap::new();
         let db = Connection::open("awdy.db").context("opening database")?;
-        let mut tags = Vec::new();
 
         {
             db.execute(
@@ -57,15 +56,6 @@ impl<'a> App<'a> {
                 (),
             )
             .context("initializing database")?;
-            let mut stmt = db
-                .prepare("SELECT DISTINCT tag FROM tags ORDER BY tag DESC")
-                .context("loading tags")?;
-            let rows = stmt
-                .query_map([], |r| Ok(r.get(0)?))
-                .context("querying tags")?;
-            for row in rows {
-                tags.push(row?);
-            }
         }
 
         let mut lanes = Vec::with_capacity(4);
@@ -86,7 +76,7 @@ impl<'a> App<'a> {
 
         let tags_list = SelectListState {
             list_state: ListState::default(),
-            items: tags.into_iter().map(|v| (v, false)).collect(),
+            items: Vec::new(),
         };
 
         lanes[0].state.selected = true;
@@ -104,7 +94,8 @@ impl<'a> App<'a> {
             },
         };
 
-        r.load_filtered_tasks()?;
+        r.update_filtered_tasks()?;
+        r.update_tags()?;
 
         Ok(r)
     }
@@ -335,7 +326,7 @@ impl<'a> App<'a> {
             Message::ToggleTag => {
                 if let Some(idx) = self.model.tags.list_state.selected {
                     self.model.tags.items[idx].1 ^= true;
-                    if let Err(e) = self.load_filtered_tasks() {
+                    if let Err(e) = self.update_filtered_tasks() {
                         self.model.last_error = Some(e);
                     }
                 }
@@ -384,6 +375,12 @@ impl<'a> App<'a> {
                         return None;
                     }
                 };
+                if let Err(e) = self.update_tags().context("updating tag list") {
+                    self.model.last_error = Some(e);
+                    self.model.task_view = Some(task.into());
+                    return None;
+                }
+
                 self.model.running_state = RunningState::MainView;
                 let mut tasks = self
                     .model
@@ -472,7 +469,7 @@ impl<'a> App<'a> {
         None
     }
 
-    fn load_filtered_tasks(&mut self) -> Result<()> {
+    fn update_filtered_tasks(&mut self) -> Result<()> {
         for state in [
             TaskState::Todo,
             TaskState::InProgress,
@@ -532,6 +529,31 @@ impl<'a> App<'a> {
         // reset focus in task lists
         for lane in &mut self.model.lanes {
             lane.state.list_state.selected = Some(0);
+        }
+
+        Ok(())
+    }
+
+    fn update_tags(&mut self) -> Result<()> {
+        let mut stmt = self
+            .db
+            .prepare("SELECT DISTINCT tag FROM tags ORDER BY tag DESC")
+            .context("loading tags")?;
+        let rows = stmt
+            .query_map([], |r| Ok(r.get(0)?))
+            .context("querying tags")?;
+
+        let mut selected_tags = HashSet::new();
+        for (tag, selected) in &self.model.tags.items {
+            if *selected {
+                selected_tags.insert(tag.clone());
+            }
+        }
+        self.model.tags.items.truncate(0);
+        for row in rows {
+            let tag = row?;
+            let selected = selected_tags.contains(&tag);
+            self.model.tags.items.push((tag, selected));
         }
 
         Ok(())
