@@ -1,7 +1,7 @@
 use ratatui::{
-    style::{Modifier, Style, Stylize},
+    style::{Style, Stylize},
     text::Text,
-    widgets::{Block, BorderType, Borders, Padding, StatefulWidget, Widget},
+    widgets::{Block, BorderType, StatefulWidget, Widget},
 };
 use tui_widget_list::{ListBuilder, ListState, ListView};
 

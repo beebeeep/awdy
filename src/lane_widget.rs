@@ -1,18 +1,37 @@
-use std::{cell::RefCell, rc::Rc};
-
 use ratatui::{
     buffer::Buffer,
-    layout::Rect,
-    style::{Modifier, Style},
-    text::{Line, Text},
+    layout::{Constraint, Layout, Rect},
+    style::{Modifier, Style, Stylize},
+    text::Line,
     widgets::{Block, BorderType, StatefulWidget, Widget},
 };
 use tui_widget_list::{ListBuilder, ListState, ListView};
 
-use crate::{
-    color_scheme::COLOR_SCHEME,
-    model::{Task, TaskMeta},
-};
+use crate::{color_scheme::COLOR_SCHEME, model::Task};
+
+struct LaneItem {
+    title: String,
+    tags: String,
+    style: Style,
+}
+
+impl Widget for LaneItem {
+    fn render(mut self, area: Rect, buf: &mut Buffer) {
+        let areas = Layout::horizontal([
+            Constraint::Min(3),
+            Constraint::Length(self.tags.len() as u16),
+        ])
+        .split(area);
+        if (areas[0].width as usize) < self.title.len() {
+            self.title.truncate(areas[0].width as usize - 1);
+            self.title.push_str(">");
+        }
+        Line::styled(self.title, self.style.clone()).render(areas[0], buf);
+        Line::styled(self.tags, self.style.bold())
+            .right_aligned()
+            .render(areas[1], buf);
+    }
+}
 
 pub(crate) struct LaneState {
     pub(crate) list_state: ListState,
@@ -29,7 +48,7 @@ impl LaneState {
 }
 
 pub(crate) struct LaneWidget<'a> {
-    pub(crate) title: &'static str,
+    pub(crate) title: &'a str,
     pub(crate) tasks: &'a [Task],
     pub(crate) inactive: bool,
 }
@@ -47,16 +66,18 @@ impl<'a> StatefulWidget for &LaneWidget<'a> {
             state.list_state.next();
         }
         let builder = ListBuilder::new(|context| {
-            let mut item = Text::from(self.tasks[context.index].title.clone());
-            item.style = Style::default()
+            let task = &self.tasks[context.index];
+            let mut style = Style::default()
                 .fg(COLOR_SCHEME.text_fg)
                 .bg(COLOR_SCHEME.text_bg);
             if context.is_selected && state.selected && !self.inactive {
-                item.style = item
-                    .style
-                    .fg(COLOR_SCHEME.cursor_fg)
-                    .bg(COLOR_SCHEME.cursor_bg);
+                style = style.fg(COLOR_SCHEME.cursor_fg).bg(COLOR_SCHEME.cursor_bg);
             }
+            let item = LaneItem {
+                title: task.title.clone(),
+                tags: format!("[{}]", task.tags.join(", ")),
+                style,
+            };
             (item, 1)
         });
         let list = ListView::new(builder, self.tasks.len());

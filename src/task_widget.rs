@@ -82,21 +82,21 @@ impl<'a> TaskView<'a> {
     }
 }
 
-impl Into<Task> for TaskView<'_> {
-    fn into(self) -> Task {
-        let description = self.text_areas[TaskView::DESCRIPTION].lines().join("\n");
+impl From<TaskView<'_>> for Task {
+    fn from(v: TaskView) -> Self {
+        let description = v.text_areas[TaskView::DESCRIPTION].lines().join("\n");
         let description = description.trim().to_string();
-        let tags = self.text_areas[TaskView::TAGS]
+        let tags = v.text_areas[TaskView::TAGS]
             .lines()
             .join("\n")
             .split(",")
             .map(|v| v.trim().to_string())
             .collect();
-        Task {
-            id: self.task_id,
-            state: self.task_state,
-            title: self.text_areas[TaskView::TITLE].lines().join("\n"),
-            description: if description.len() == 0 {
+        Self {
+            id: v.task_id,
+            state: v.task_state,
+            title: v.text_areas[TaskView::TITLE].lines().join("\n"),
+            description: if description.is_empty() {
                 None
             } else {
                 Some(description.to_string())

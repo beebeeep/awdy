@@ -1,9 +1,7 @@
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result};
 use rusqlite::{Connection, params, params_from_iter};
 use std::{
-    cell::RefCell,
     collections::{HashMap, HashSet},
-    rc::Rc,
     time::Duration,
 };
 use tui_widget_list::ListState;
@@ -11,17 +9,16 @@ use tui_widget_list::ListState;
 use ratatui::{
     Frame,
     crossterm::event::{self, Event, KeyCode, KeyModifiers},
-    layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Style, Stylize},
-    text::Line,
-    widgets::{Block, Clear, Paragraph},
+    layout::{Constraint, Layout, Rect},
+    style::Stylize,
+    widgets::Paragraph,
 };
 
 use crate::{
     color_scheme::COLOR_SCHEME,
     error_widget::ErrorWidget,
     lane_widget::{LaneState, LaneWidget},
-    model::{Message, Model, RunningState, SelectedPane, Task, TaskMeta, TaskState},
+    model::{Message, Model, RunningState, SelectedPane, Task, TaskState},
     selectlist_widget::{SelectList, SelectListState},
 };
 
@@ -351,8 +348,10 @@ impl<'a> App<'a> {
                 self.model.running_state = RunningState::TaskView;
             }
             Message::NewTask => {
-                let mut task = Task::default();
-                task.state = TaskState::from(self.model.active_lane as i32);
+                let task = Task {
+                    state: TaskState::from(self.model.active_lane as i32),
+                    ..Default::default()
+                };
                 self.model.task_view = Some(task.into());
                 self.model.running_state = RunningState::TaskView;
             }
@@ -414,10 +413,10 @@ impl<'a> App<'a> {
                 let from_tasks = self.model.tasks.get_mut(&from_state).unwrap();
                 // move focus upwards if last task in list was selected
                 match self.model.lanes[self.model.active_lane].list_state.selected {
-                    Some(idx) if idx >= from_tasks.len() => {
+                    Some(idx) if idx >= from_tasks.len() - 1 => {
                         self.model.lanes[self.model.active_lane]
                             .list_state
-                            .select(Some(from_tasks.len().saturating_sub(1)));
+                            .select(Some(from_tasks.len().saturating_sub(2)));
                     }
                     _ => {}
                 }
@@ -470,8 +469,7 @@ impl<'a> App<'a> {
             .filter(|x| x.1)
             .map(|x| x.0.clone())
             .collect();
-        let placeholders = std::iter::repeat("?")
-            .take(tags.len())
+        let placeholders = std::iter::repeat_n("?", tags.len())
             .collect::<Vec<_>>()
             .join(",");
         let sql = if tags.is_empty() {
@@ -500,8 +498,9 @@ impl<'a> App<'a> {
                 .context("reading tasks from DB")?;
             for row in rows {
                 let mut task = row.context("decoding task")?;
-                let mut stmt = tx.prepare("SELECT tag FROM tags WHERE task_id = ?")?;
-                for tag_row in stmt.query_map([task.id.unwrap() as i64], |r| Ok(r.get(0)?))? {
+                let mut stmt =
+                    tx.prepare("SELECT tag FROM tags WHERE task_id = ? ORDER BY tag DESC")?;
+                for tag_row in stmt.query_map([task.id.unwrap() as i64], |r| r.get(0))? {
                     task.tags.push(tag_row?);
                 }
                 self.model.tasks.get_mut(&task.state).unwrap().push(task);
@@ -522,9 +521,7 @@ impl<'a> App<'a> {
             .db
             .prepare("SELECT DISTINCT tag FROM tags ORDER BY tag DESC")
             .context("loading tags")?;
-        let rows = stmt
-            .query_map([], |r| Ok(r.get(0)?))
-            .context("querying tags")?;
+        let rows = stmt.query_map([], |r| r.get(0)).context("querying tags")?;
 
         let mut selected_tags = HashSet::new();
         for (tag, selected) in &self.model.tags.items {
@@ -555,8 +552,10 @@ impl<'a> App<'a> {
                 tags: Vec::new(),
             })
         })?;
-        stmt = self.db.prepare("SELECT tag FROM tags WHERE task_id = ?")?;
-        for row in stmt.query_map([id as i64], |r| Ok(r.get(0)?))? {
+        stmt = self
+            .db
+            .prepare("SELECT tag FROM tags WHERE task_id = ? ORDER BY tag DESC")?;
+        for row in stmt.query_map([id as i64], |r| r.get(0))? {
             task.tags.push(row?);
         }
         Ok(task)
@@ -599,12 +598,12 @@ impl<'a> App<'a> {
                 .context("querying tags")?;
             let mut old_tags: HashSet<String> = HashSet::new();
             for row in stmt
-                .query_map([id as i64], |r| Ok(r.get(0)?))
+                .query_map([id as i64], |r| r.get(0))
                 .context("querying tags")?
             {
                 old_tags.insert(row?);
             }
-            let new_tags = HashSet::from_iter(task.tags.iter().map(|x| x.clone()));
+            let new_tags = HashSet::from_iter(task.tags.iter().cloned());
             let tags_to_remove = old_tags.difference(&new_tags);
             let tags_to_add = new_tags.difference(&old_tags);
             let mut stmt = tx

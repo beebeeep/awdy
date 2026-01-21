@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{collections::HashMap, fmt::Display};
 
 use ratatui::crossterm::event::KeyEvent;
 
@@ -15,13 +15,6 @@ pub(crate) struct Model<'a> {
 
     pub(crate) task_view: Option<TaskView<'a>>,
     pub(crate) last_error: Option<anyhow::Error>,
-}
-
-#[derive(Clone, PartialEq)]
-pub(crate) struct TaskMeta {
-    pub(crate) id: Option<u64>,
-    pub(crate) state: TaskState,
-    pub(crate) title: String,
 }
 
 #[derive(Default, Clone, PartialEq)]
@@ -56,18 +49,15 @@ pub(crate) enum TaskState {
     Done = 3,
 }
 
-impl From<Task> for TaskMeta {
-    fn from(t: Task) -> Self {
-        Self {
-            id: t.id,
-            state: t.state,
-            title: t.title,
-        }
+impl Display for TaskState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str((*self).into())
     }
 }
+
 impl From<TaskState> for &'static str {
-    fn from(t: TaskState) -> Self {
-        match t {
+    fn from(value: TaskState) -> Self {
+        match value {
             TaskState::Todo => "TODO",
             TaskState::InProgress => "In progress",
             TaskState::Blocked => "Blocked",
