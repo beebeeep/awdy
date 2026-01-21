@@ -126,7 +126,7 @@ impl<'a> App<'a> {
     fn status_bar(&self, frame: &mut Frame, area: Rect) {
         let text = match self.model.running_state {
             RunningState::MainView => {
-                "Hint: use Tab and Shift+Tab to move between lanes, arrows or hjkl for navigation. Enter opens task."
+                "Hint: use Tab and Shift+Tab to move between panes, arrows or hjkl for navigation. Enter opens task, <n> creates new task"
             }
             RunningState::TaskView => {
                 "Hint: Esc to close without saving, Ctrl+S to save and close. Tags are comma-separated"
