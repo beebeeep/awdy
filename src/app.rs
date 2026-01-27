@@ -2,7 +2,6 @@ use anyhow::{Context, Result};
 use rusqlite::{Connection, params, params_from_iter};
 use std::{
     collections::{HashMap, HashSet},
-    ops::Index,
     time::Duration,
 };
 use tui_widget_list::ListState;
@@ -437,16 +436,12 @@ impl<'a> App<'a> {
                         None => return None,
                     };
                 let mut task = {
-                    let task = match self
+                    let task = self
                         .model
                         .tasks
                         .get_mut(&self.model.active_lane.into())
                         .unwrap()
-                        .get_mut(selected_task)
-                    {
-                        Some(v) => v,
-                        None => return None,
-                    };
+                        .get_mut(selected_task)?;
                     match task.tags.iter().position(|v| v == &tag) {
                         Some(idx) => {
                             task.tags.remove(idx);

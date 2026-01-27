@@ -10,6 +10,6 @@ fn main() -> Result<()> {
                 .default_value("~/.config/awdy/awdy.db"),
         )
         .get_matches();
-    let app = App::load(&matches.get_one::<String>("db").unwrap())?;
+    let app = App::load(matches.get_one::<String>("db").unwrap())?;
     app.run()
 }

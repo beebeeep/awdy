@@ -24,9 +24,9 @@ impl Widget for LaneItem {
         .split(area);
         if (areas[0].width as usize) < self.title.len() {
             self.title.truncate(areas[0].width as usize - 1);
-            self.title.push_str(">");
+            self.title.push('>');
         }
-        Line::styled(self.title, self.style.clone()).render(areas[0], buf);
+        Line::styled(self.title, self.style).render(areas[0], buf);
         Line::styled(self.tags, self.style.bold())
             .right_aligned()
             .render(areas[1], buf);
