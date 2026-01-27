@@ -28,9 +28,12 @@ pub struct App<'a> {
 }
 
 impl<'a> App<'a> {
-    pub fn load() -> Result<Self> {
+    pub fn load(db_path: &str) -> Result<Self> {
         let mut tasks = HashMap::new();
-        let db = Connection::open("awdy.db").context("opening database")?;
+        let db = match Connection::open(db_path).context("opening database") {
+            Ok(db) => db,
+            Err(_) => Connection::open("awdy.db").context("opening database")?,
+        };
 
         {
             db.execute(
