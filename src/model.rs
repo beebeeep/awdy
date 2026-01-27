@@ -76,6 +76,11 @@ impl From<i32> for TaskState {
         }
     }
 }
+impl From<usize> for TaskState {
+    fn from(value: usize) -> Self {
+        Self::from(value as i32)
+    }
+}
 
 #[derive(PartialEq)]
 pub(crate) enum Message {
@@ -94,6 +99,7 @@ pub(crate) enum Message {
     CloseTask,
     SaveTask,
     MoveTask(TaskState),
+    ToggleTaskTag(String),
     FocusNext,
     FocusPrev,
     CloseError,

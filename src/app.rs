@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use rusqlite::{Connection, params, params_from_iter};
 use std::{
     collections::{HashMap, HashSet},
+    ops::Index,
     time::Duration,
 };
 use tui_widget_list::ListState;
@@ -21,6 +22,8 @@ use crate::{
     model::{Message, Model, RunningState, SelectedPane, Task, TaskState},
     selectlist_widget::{SelectList, SelectListState},
 };
+
+const ARCHIVE_TAG: &'static str = "Archive";
 
 pub struct App<'a> {
     model: Model<'a>,
@@ -129,7 +132,7 @@ impl<'a> App<'a> {
     fn status_bar(&self, frame: &mut Frame, area: Rect) {
         let text = match self.model.running_state {
             RunningState::MainView => {
-                "Hint: use Tab and Shift+Tab to move between panes, arrows or hjkl for navigation. Enter opens task, <n> creates new task"
+                "Hint: use Tab and Shift+Tab to move between panes, arrows or hjkl for navigation. Move task between panes using keys 1,2,3,4. Enter opens task, <n> creates new task, <a> archives task"
             }
             RunningState::TaskView => {
                 "Hint: Esc to close without saving, Ctrl+S to save and close. Tags are comma-separated"
@@ -219,6 +222,7 @@ impl<'a> App<'a> {
                 KeyCode::Char('2') => Some(Message::MoveTask(TaskState::InProgress)),
                 KeyCode::Char('3') => Some(Message::MoveTask(TaskState::Blocked)),
                 KeyCode::Char('4') => Some(Message::MoveTask(TaskState::Done)),
+                KeyCode::Char('a') => Some(Message::ToggleTaskTag(String::from(ARCHIVE_TAG))),
                 KeyCode::Right | KeyCode::Char('l') => Some(Message::NextLane),
                 KeyCode::Left | KeyCode::Char('h') => Some(Message::PrevLane),
                 KeyCode::Tab => Some(Message::NextPane),
@@ -426,6 +430,46 @@ impl<'a> App<'a> {
                 let task = from_tasks.remove(selected_task);
                 self.model.tasks.get_mut(&to_state).unwrap().push(task);
             }
+            Message::ToggleTaskTag(tag) => {
+                let selected_task =
+                    match self.model.lanes[self.model.active_lane].list_state.selected {
+                        Some(v) => v,
+                        None => return None,
+                    };
+                let mut task = {
+                    let task = match self
+                        .model
+                        .tasks
+                        .get_mut(&self.model.active_lane.into())
+                        .unwrap()
+                        .get_mut(selected_task)
+                    {
+                        Some(v) => v,
+                        None => return None,
+                    };
+                    match task.tags.iter().position(|v| v == &tag) {
+                        Some(idx) => {
+                            task.tags.remove(idx);
+                        }
+                        None => {
+                            task.tags.push(tag);
+                        }
+                    }
+                    task.clone()
+                };
+                if let Err(e) = self.save_task(&mut task).context("saving tags") {
+                    self.model.last_error = Some(e);
+                    return None;
+                }
+                if let Err(e) = self.update_tags().context("updating tags") {
+                    self.model.last_error = Some(e);
+                    return None;
+                }
+                if let Err(e) = self.update_filtered_tasks().context("updating tasks view") {
+                    self.model.last_error = Some(e);
+                    return None;
+                }
+            }
             Message::FocusNext => match self.model.running_state {
                 RunningState::TaskView => {
                     if let Some(tv) = self.model.task_view.as_mut() {
@@ -527,7 +571,7 @@ impl<'a> App<'a> {
         let rows = stmt.query_map([], |r| r.get(0)).context("querying tags")?;
 
         let mut selected_tags = HashSet::new();
-        for (tag, selected) in &self.model.tags.items {
+        for (tag, selected, _) in &self.model.tags.items {
             if *selected {
                 selected_tags.insert(tag.clone());
             }
@@ -536,7 +580,18 @@ impl<'a> App<'a> {
         for row in rows {
             let tag = row?;
             let selected = selected_tags.contains(&tag);
-            self.model.tags.items.push((tag, selected));
+            let clean_mark = if tag == ARCHIVE_TAG { "-" } else { " " };
+            self.model.tags.items.push((tag, selected, clean_mark));
+        }
+        let item_count = self.model.tags.items.len();
+        match self.model.tags.list_state.selected {
+            Some(idx) if idx >= item_count - 1 => {
+                self.model
+                    .tags
+                    .list_state
+                    .select(Some(item_count.saturating_sub(2)));
+            }
+            _ => {}
         }
 
         Ok(())

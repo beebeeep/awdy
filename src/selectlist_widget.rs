@@ -9,7 +9,7 @@ use crate::color_scheme::COLOR_SCHEME;
 
 pub(crate) struct SelectListState {
     pub(crate) list_state: ListState,
-    pub(crate) items: Vec<(String, bool)>,
+    pub(crate) items: Vec<(String, bool, &'static str)>, //3rd element is symbol shown if item is not selected
 }
 
 pub(crate) struct SelectList {
@@ -37,8 +37,12 @@ impl StatefulWidget for &SelectList {
             if item.1 {
                 style = style.bold();
             }
-            let mut item =
-                Text::from(format!("[{}] {}", if item.1 { "x" } else { " " }, item.0)).style(style);
+            let mut item = Text::from(format!(
+                "[{}] {}",
+                if item.1 { "x" } else { item.2 },
+                item.0
+            ))
+            .style(style);
             if !self.inactive && context.is_selected {
                 item.style = item
                     .style
