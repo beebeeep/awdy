@@ -141,7 +141,7 @@ impl From<Task> for TaskView<'_> {
 
 impl Widget for &TaskView<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let window_area = centered_rect(area, 80, 80);
+        let window_area = centered_rect(area, 70, 70);
         let block = Block::bordered()
             .title(
                 self.task_id
