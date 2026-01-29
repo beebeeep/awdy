@@ -2,6 +2,11 @@
 name = "awdy"
 version = "0.1.0"
 edition = "2024"
+readme = "README.md"
+repository = "https://github.com/beebeeep/awdy"
+description = "TUI task tracker"
+license = "MIT"
+keywords = ["tui", "task-tracker"]
 
 [dependencies]
 anyhow = "1.0.100"
