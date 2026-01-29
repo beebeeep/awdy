@@ -23,11 +23,11 @@ impl ColorScheme {
         Self {
             text_fg: Color::Reset,
             text_bg: Color::Reset,
-            cursor_fg: Color::Reset,
+            cursor_fg: Color::Rgb(0, 0, 0),
             cursor_bg: Color::Rgb(0xbf, 0xdb, 0xfe),
             lane_title_fg: Color::Reset,
             lane_title_bg: Color::Reset,
-            lane_active_title_fg: Color::Reset,
+            lane_active_title_fg: Color::Rgb(0, 0, 0),
             lane_active_title_bg: Color::Rgb(0xbf, 0xdb, 0xfe),
             status_bar_fg: Color::Reset,
             status_bar_bg: Color::Rgb(0xd0, 0xd0, 0xd0),
