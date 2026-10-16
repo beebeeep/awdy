@@ -11,7 +11,7 @@ use ratatui::{
     crossterm::event::{self, Event, KeyCode, KeyModifiers},
     layout::{Constraint, Layout, Rect},
     style::Stylize,
-    widgets::Paragraph,
+    widgets::{Paragraph, Widget},
 };
 
 use crate::{
@@ -27,6 +27,7 @@ const ARCHIVE_TAG: &'static str = "Archive";
 pub struct App<'a> {
     model: Model<'a>,
     db: rusqlite::Connection,
+    db_file: String,
 }
 
 impl<'a> App<'a> {
@@ -34,7 +35,7 @@ impl<'a> App<'a> {
         let mut tasks = HashMap::new();
         let db = match Connection::open(db_path).context("opening database") {
             Ok(db) => db,
-            Err(_) => Connection::open("awdy.db").context("opening database")?,
+            Err(e) => return Err(e),
         };
 
         {
@@ -78,6 +79,7 @@ impl<'a> App<'a> {
         lanes[0].selected = true;
         let mut r = Self {
             db,
+            db_file: String::from(db_path),
             model: Model {
                 active_lane: 0,
                 active_pane: SelectedPane::Lanes,
@@ -129,20 +131,26 @@ impl<'a> App<'a> {
     }
 
     fn status_bar(&self, frame: &mut Frame, area: Rect) {
-        let text = match self.model.running_state {
-            RunningState::MainView => {
-                "Hint: use Tab and Shift+Tab to move between panes, arrows or hjkl for navigation. Move task between panes using keys 1,2,3,4. Enter opens task, <n> creates new task, <a> archives task"
-            }
-            RunningState::TaskView => {
-                "Hint: Esc to close without saving, Ctrl+S to save and close. Tags are comma-separated"
-            }
-            RunningState::Done => return,
-        };
+        let text = format!(
+            "{} | {}",
+            self.db_file,
+            match self.model.running_state {
+                RunningState::MainView => {
+                    "Hint: use Tab and Shift+Tab to move between panes, arrows or hjkl for navigation. Move task between panes using keys 1,2,3,4. Enter opens task, <n> creates new task, <a> archives task"
+                }
+                RunningState::TaskView => {
+                    "Hint: Esc to close without saving, Ctrl+S to save and close. Tags are comma-separated"
+                }
+                RunningState::Done => return,
+            },
+        );
 
-        let c = Paragraph::new(text)
+        // let parts = Layout::horizontal([Constraint::Percentage(90), Constraint::Percentage(10)])
+        //     .split(area);
+        Paragraph::new(text)
             .bg(COLOR_SCHEME.status_bar_bg)
-            .fg(COLOR_SCHEME.status_bar_fg);
-        frame.render_widget(c, area);
+            .fg(COLOR_SCHEME.status_bar_fg)
+            .render(area, frame.buffer_mut());
     }
 
     fn main_view(&mut self, frame: &mut Frame, area: Rect) {
